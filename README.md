@@ -37,6 +37,22 @@
   ⭐ <em>Help more people find Hypit and grow the community. Star this repo!</em>
 </p>
 
+## ⚠️ Lưu ý (Tiếng Việt)
+
+> **Yêu cầu HypiHub Credit để chạy project này.**
+>
+> Mọi tính năng AI (tạo ảnh, giọng nói, video...) đều đi qua dịch vụ **HypiHub** tại [hypit.ai](https://hypit.ai).
+> Bạn cần:
+> 1. Tạo tài khoản tại hypit.ai
+> 2. Nạp credits vào tài khoản (~$1–2 cho mỗi video)
+> 3. Tạo HypiHub API key và đăng nhập qua CLI
+>
+> Nếu không có credits, bạn chỉ có thể xem plan (`hypit plan`) hoặc chạy các ví dụ không cần AI như `examples/semantic-composition/chat.svrun`.
+>
+> **API key OpenAI / Fish Audio của bạn KHÔNG dùng trực tiếp được với Hypit** — chỉ cần credits HypiHub là đủ.
+
+---
+
 ## Hypit
 
 Hypit gives AI agents (Claude Code, Codex...) a language and system to create video. Drop in a video, and your agent clones it as a complete workflow: footage, captions, B-roll and effects, all anchored to words instead of seconds.
