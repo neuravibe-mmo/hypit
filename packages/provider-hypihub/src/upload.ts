@@ -1,7 +1,9 @@
-import { requestDeadline } from "@hypit/runtime-kit";
+import { EndpointServiceError } from "@hypit/hypit/endpoint";
+import { EndpointResponseError, withRequestDeadline } from "@hypit/hypit/endpoint/http";
 import { createHash } from "node:crypto";
 
 import type { HypiHubAuth } from "./oauth.js";
+import { HypiHubHttpError, HypiHubServiceError, safeHypiHubReason } from "./errors.js";
 
 type UploadAuth = HypiHubAuth | string;
 
@@ -45,12 +47,6 @@ function apiBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/u, "");
   assert(trimmed.length > 0, "HypiHub upload base URL is empty");
   return `${trimmed.replace(/\/(?:v1beta|v1)$/iu, "")}/v1`;
-}
-
-class HypiHubHTTPError extends Error {
-  constructor(readonly status: number, message: string, readonly retryAfterMs?: number, readonly code?: string) {
-    super(message);
-  }
 }
 
 export type HypiHubUploaderOptions = {
@@ -149,7 +145,7 @@ export class HypiHubUploader {
 
   private safeReason(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
-    return message.replace(/https?:\/\/\S+/giu, "[redacted-url]").slice(0, 300);
+    return safeHypiHubReason(message);
   }
 
   private async json(path: string, auth: UploadAuth, init: RequestInit = {}): Promise<Record<string, unknown>> {
@@ -159,7 +155,7 @@ export class HypiHubUploader {
       try {
         return await this.jsonOnce(path, auth, init, Math.max(1, deadline - Date.now()));
       } catch (error) {
-        const http = error instanceof HypiHubHTTPError ? error : undefined;
+        const http = error instanceof HypiHubHttpError ? error : undefined;
         // Existing-session operations are idempotent. A new session may only
         // be retried after an explicit 429 rejection, never an unknown result.
         const retryable = http !== undefined
@@ -180,39 +176,32 @@ export class HypiHubUploader {
 
   private async jsonOnce(path: string, auth: UploadAuth, init: RequestInit, timeoutMs: number, retryAuth = true): Promise<Record<string, unknown>> {
     const token = await uploadToken(auth);
-    const request = requestDeadline(timeoutMs);
     const deadline = Date.now() + timeoutMs;
-    try {
-      const response = await request.wait(this.fetcher(`${this.baseUrl}${path}`, {
+    const result = await withRequestDeadline(timeoutMs, async ({ signal, wait }) => {
+      const response = await wait(this.fetcher(`${this.baseUrl}${path}`, {
         ...init,
-        signal: request.signal,
+        signal,
         headers: { authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
       }));
-      const text = await request.wait(response.text());
+      const text = await wait(response.text());
       if (response.status === 401 && retryAuth && uploadCanRefresh(auth)) {
-        request.finish();
-        await (auth as HypiHubAuth).refresh();
-        return await this.jsonOnce(path, auth, init, Math.max(1, deadline - Date.now()), false);
+        return undefined;
       }
       let body: unknown = {};
       try { body = text.length === 0 ? {} : JSON.parse(text); }
       catch {
-        if (response.ok) throw new Error(`HypiHub returned invalid JSON (${response.status})`);
+        if (response.ok) throw new EndpointResponseError(`HypiHub returned invalid JSON (${response.status})`);
       }
       if (!response.ok) {
-        const errorBody = body !== null && typeof body === "object" && "error" in body ? body.error : undefined;
-        const code = errorBody !== null && typeof errorBody === "object" && "code" in errorBody
-          && typeof errorBody.code === "string" ? errorBody.code : undefined;
-        const retryAfter = response.headers.get("retry-after");
-        const parsedRetry = retryAfter === null ? NaN : /^\d+$/u.test(retryAfter.trim())
-          ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
-        throw new HypiHubHTTPError(response.status, `HypiHub returned HTTP ${response.status}: ${this.safeReason(text)}`,
-          Number.isFinite(parsedRetry) ? Math.max(0, parsedRetry) : undefined, code);
+        throw new HypiHubHttpError(response.status, response, text, {
+          method: init.method ?? "GET", url: `${this.baseUrl}${path}`,
+        });
       }
       return object(body, "HypiHub response");
-    } finally {
-      request.finish();
-    }
+    });
+    if (result !== undefined) return result;
+    await (auth as HypiHubAuth).refresh();
+    return await this.jsonOnce(path, auth, init, Math.max(1, deadline - Date.now()), false);
   }
 
   private async signParts(uploadId: string, declarations: readonly PartDeclaration[], auth: UploadAuth): Promise<Map<number, Record<string, unknown>>> {
@@ -268,40 +257,39 @@ export class HypiHubUploader {
         const refreshed = await this.signParts(uploadId, [declaration], auth);
         capability = refreshed.get(declaration.part_number) ?? {};
       }
-      const request = requestDeadline(this.uploadPartTimeout);
       const startedAt = Date.now();
       this.log(`part upload started upload=${uploadId} part=${declaration.part_number} bytes=${declaration.bytes} attempt=${attempt + 1}`);
       try {
-        const url = requiredString(capability.url, "HypiHub signed upload URL");
-        assertHTTPS(url, "HypiHub signed upload URL");
-        const payload = new ArrayBuffer(body.byteLength);
-        new Uint8Array(payload).set(body);
-        const response = await request.wait(this.fetcher(url, {
-          method: "PUT",
-          headers: this.signedHeaders(capability.headers, declaration),
-          body: payload,
-          signal: request.signal,
-        }));
-        if (!response.ok) throw new Error(`S3 rejected upload part ${declaration.part_number} with HTTP ${response.status}`);
-        const etag = response.headers.get("etag");
-        assert(etag !== null && etag.length > 0, `S3 upload part ${declaration.part_number} returned no ETag`);
-        const verified = response.headers.get("x-amz-checksum-sha256");
-        assert(verified === null || verified === declaration.checksum_sha256,
-          `S3 upload part ${declaration.part_number} returned a different checksum`);
-        this.log(`part upload completed upload=${uploadId} part=${declaration.part_number} bytes=${declaration.bytes} attempt=${attempt + 1} elapsed=${this.elapsed(startedAt)}`);
-        return {
-          part_number: declaration.part_number,
-          etag,
-          checksum_sha256: declaration.checksum_sha256,
-        };
+        return await withRequestDeadline(this.uploadPartTimeout, async ({ signal, wait }) => {
+          const url = requiredString(capability.url, "HypiHub signed upload URL");
+          assertHTTPS(url, "HypiHub signed upload URL");
+          const payload = new ArrayBuffer(body.byteLength);
+          new Uint8Array(payload).set(body);
+          const response = await wait(this.fetcher(url, {
+            method: "PUT",
+            headers: this.signedHeaders(capability.headers, declaration),
+            body: payload,
+            signal,
+          }));
+          if (!response.ok) throw new Error(`S3 rejected upload part ${declaration.part_number} with HTTP ${response.status}`);
+          const etag = response.headers.get("etag");
+          assert(etag !== null && etag.length > 0, `S3 upload part ${declaration.part_number} returned no ETag`);
+          const verified = response.headers.get("x-amz-checksum-sha256");
+          assert(verified === null || verified === declaration.checksum_sha256,
+            `S3 upload part ${declaration.part_number} returned a different checksum`);
+          this.log(`part upload completed upload=${uploadId} part=${declaration.part_number} bytes=${declaration.bytes} attempt=${attempt + 1} elapsed=${this.elapsed(startedAt)}`);
+          return {
+            part_number: declaration.part_number,
+            etag,
+            checksum_sha256: declaration.checksum_sha256,
+          };
+        });
       } catch (error) {
         this.log(`part upload failed upload=${uploadId} part=${declaration.part_number} attempt=${attempt + 1} elapsed=${this.elapsed(startedAt)} reason=${this.safeReason(error)}`);
         if (attempt + 1 < this.uploadPartAttempts) {
           this.log(`part upload retry scheduled upload=${uploadId} part=${declaration.part_number} next_attempt=${attempt + 2}`);
           await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
         }
-      } finally {
-        request.finish();
       }
     }
     // A presigned URL is a temporary credential, so never include the fetcher's URL-bearing error.
@@ -365,12 +353,15 @@ export class HypiHubUploader {
       this.log(`multipart upload failed upload=${uploadId} reason=${this.safeReason(error)}`);
       try { await this.json(`/files/uploads/${encodeURIComponent(uploadId)}`, auth, { method: "DELETE" }); }
       catch (cancelError) {
-        if (!(cancelError instanceof HypiHubHTTPError && (cancelError.status === 404
+        if (!(cancelError instanceof HypiHubHttpError && (cancelError.status === 404
           || (cancelError.status === 409 && cancelError.code === "upload_completed")))) {
           this.log(`upload cancellation still pending upload=${uploadId} reason=${this.safeReason(cancelError)}`);
         }
       }
-      throw new Error(this.safeReason(error));
+      throw error instanceof EndpointServiceError || error instanceof HypiHubHttpError
+        ? error
+        : new HypiHubServiceError("HYPIHUB_UPLOAD_FAILED",
+          `HypiHub reference upload failed before generation submission: ${this.safeReason(error)}`);
     }
   }
 

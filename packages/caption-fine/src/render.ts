@@ -1,3 +1,4 @@
+import { assertTimelineIdentity, timelineFrameCount } from "@hypit/timeline";
 import type { Timeline } from "@hypit/timeline";
 import { assertCaptionProgramForDocument } from "@hypit/caption";
 import type { CaptionProgram } from "@hypit/caption";
@@ -8,19 +9,23 @@ import type {
   VisualColorPaint,
   VisualElement,
   VisualKeyframe,
+  VisualProgramElement,
   VisualStyleDeclaration,
   VisualTextElement,
   VisualTextPaintLayer,
   VisualTrack,
 } from "@hypit/composition";
-import type { CaptionAlignmentUnit, CaptionDocument } from "@hypit/narrative";
-import { assertProgramSpaceIdentity, programSpaceFrameCount } from "@hypit/program-space";
-import { assertSpatialRegionTimeline } from "@hypit/spatial";
-import type { CanvasSpace, SpatialFrame, SpatialRegionTimeline } from "@hypit/spatial";
+import type { CaptionDocument, CaptionDisplayWord, CaptionUnit } from "@hypit/caption";
+import { assertRegionEvidence } from "@hypit/region-evidence";
+import type { RegionEvidence } from "@hypit/region-evidence";
+import { assertSpatialFrame } from "@hypit/spatial";
+import type { SpatialFrame } from "@hypit/spatial";
 
 import { assertFineCaptionParameters, FINE_CAPTION_FAMILY } from "./style.js";
 import { assertFineCaptionSchedule } from "./schedule.js";
-import { joinSurfaces, uniformGap, wordGapBetween, wordGaps } from "./spacing.js";
+import { uniformGap, wordGaps } from "./spacing.js";
+import { htmlVisual } from "@hypit/html-program";
+import { joinedBoxSetup } from "./joined-box.js";
 import type {
   FineCaptionActiveUnderline,
   FineCaptionGlyphPaint,
@@ -595,13 +600,12 @@ function anchorTransform(parameters: FineCaptionParameters): string | undefined 
 function trackedPlacementAnimation(
   parameters: FineCaptionParameters,
   frames: readonly (SpatialFrame | null)[],
-  canvas: CanvasSpace,
 ): VisualAnimation {
   if (frames.length === 0) throw new Error("Fine Caption tracked placement has no Frames");
   const anchor = anchorTransform(parameters);
   const transform = (frame: SpatialFrame | null): string => {
-    const xPx = frame === null ? parameters.placement.x * canvas.widthPx : frame.xPx + frame.widthPx / 2;
-    const yPx = frame === null ? parameters.placement.y * canvas.heightPx : frame.yPx;
+    const xPx = frame === null ? 0 : frame.xPx + frame.widthPx / 2;
+    const yPx = frame === null ? 0 : frame.yPx;
     return `translate(${compactNumber(xPx)}px,${compactNumber(yPx)}px)${anchor === undefined ? "" : ` ${anchor}`}`;
   };
   const keyframes: VisualKeyframe[] = frames.map((frame, atFrame) => ({
@@ -621,20 +625,17 @@ function trackedPlacementAnimation(
   return { keyframes };
 }
 
-function structuralRowCount(
-  atoms: readonly CaptionAlignmentUnit[],
-  maxWordsPerLine: number,
-): number {
-  let rows = atoms.length === 0 ? 0 : 1;
+function structuralRowStarts(atoms: readonly CaptionUnit[], maxWordsPerLine?: number): ReadonlySet<number> {
+  const starts = new Set<number>();
   let wordsOnRow = 0;
-  for (const atom of atoms) {
-    if (wordsOnRow > 0 && wordsOnRow + atom.wordIds.length > maxWordsPerLine) {
-      rows += 1;
+  for (const [index, atom] of atoms.entries()) {
+    if (index === 0 || (maxWordsPerLine !== undefined && wordsOnRow > 0 && wordsOnRow + atom.wordIds.length > maxWordsPerLine)) {
+      starts.add(index);
       wordsOnRow = 0;
     }
     wordsOnRow += atom.wordIds.length;
   }
-  return rows;
+  return starts;
 }
 
 /**
@@ -643,7 +644,7 @@ function structuralRowCount(
  * owner: as soon as the next authored unit starts, the previous one stops.
  */
 function exclusiveActivationFrames(
-  atoms: readonly CaptionAlignmentUnit[],
+  atoms: readonly CaptionUnit[],
   atomFrames: ReadonlyMap<string, { readonly start: number; readonly end: number }>,
 ): ReadonlyMap<string, { readonly start: number; readonly end: number }> {
   return new Map(atoms.map((atom, index) => {
@@ -662,18 +663,18 @@ function exclusiveActivationFrames(
 }
 
 function cueElements(
-  atoms: readonly CaptionAlignmentUnit[],
+  atoms: readonly CaptionUnit[],
   atomFrames: ReadonlyMap<string, { readonly start: number; readonly end: number }>,
   parameters: FineCaptionParameters,
-  wordText: ReadonlyMap<string, string>,
+  wordText: ReadonlyMap<string, CaptionDisplayWord>,
   durationFrames: number,
   styleId: string,
+  within: SpatialFrame,
   trackedPlacement?: {
     readonly frames: readonly (SpatialFrame | null)[];
-    readonly canvas: CanvasSpace;
   },
 ): VisualElement[] {
-  type UnorderedVisualElement = Omit<VisualBoxElement, "order"> | Omit<VisualTextElement, "order">;
+  type UnorderedVisualElement = Omit<VisualBoxElement, "order"> | Omit<VisualTextElement, "order"> | Omit<VisualProgramElement, "order">;
   const elements: VisualElement[] = [];
   let order = 0;
   const push = (element: UnorderedVisualElement): void => {
@@ -682,7 +683,7 @@ function cueElements(
   };
   const placementAnimation = trackedPlacement === undefined
     ? undefined
-    : trackedPlacementAnimation(parameters, trackedPlacement.frames, trackedPlacement.canvas);
+    : trackedPlacementAnimation(parameters, trackedPlacement.frames);
   const transform = placementAnimation === undefined
     ? anchorTransform(parameters)
     : (() => {
@@ -694,21 +695,29 @@ function cueElements(
   const cueLoop = parameters.motion.loopTarget === "cue" ? loopAnimation(parameters, durationFrames) : undefined;
   const activationFrames = exclusiveActivationFrames(atoms, atomFrames);
   const gapPx = `${compactNumber(parameters.layout.wordGapPx)}px`;
-  const atomSurfaces = atoms.map((atom) => atom.wordIds.map((wordId) => wordText.get(wordId) ?? ""));
-  // A Cue whose boundaries all agree carries one `column-gap`, which is also what keeps a row that
-  // wraps from opening on a margin. A Cue that mixes scripts spaces each element instead.
-  const atomGaps = atomSurfaces.map((surfaces, index) => {
-    const previous = atomSurfaces[index - 1];
-    return previous === undefined ? false : wordGapBetween(previous.at(-1) ?? "", surfaces[0] ?? "");
-  });
-  const cueGap = uniformGap(atomGaps);
+  const atomWords = atoms.map(atom => atom.wordIds.map(wordId => {
+    const word = wordText.get(wordId);
+    if (!word) throw new Error(`Fine Caption Atom references unknown word ${wordId}`);
+    return word;
+  }));
+  const atomSurfaces = atomWords.map(words => words.map(word => word.text));
+  const atomGaps = atomWords.map((words, index) => index > 0 && words[0]!.separatorBefore === " ");
   // The Visual IR carries physical margins, so the leading edge follows the Cue's own direction.
   const marginStart = parameters.layout.direction === "rtl" ? "margin-right" : "margin-left";
   const spacedStyle = (spaced: boolean): readonly VisualStyleDeclaration[] =>
     spaced ? [{ name: marginStart, value: gapPx }] : [];
+  const atomFlow = (words: readonly CaptionDisplayWord[]): VisualStyleDeclaration[] => [
+    ...(uniformGap(wordGaps(words)) === true ? [{ name: "column-gap", value: gapPx }] : []),
+    { name: "display", value: "inline-flex" },
+    { name: "min-width", value: "0" },
+    { name: "overflow-wrap", value: "anywhere" },
+    { name: "white-space", value: "normal" },
+    { name: "word-break", value: parameters.layout.wrap === "grapheme" ? "break-all" : "normal" },
+  ];
   const fonts = parameters.typography.exactFonts;
+  const rowStarts = structuralRowStarts(atoms, parameters.layout.maxWordsPerLine);
   if (parameters.layout.maxLines !== undefined) {
-    const rows = structuralRowCount(atoms, parameters.layout.maxWordsPerLine!);
+    const rows = rowStarts.size;
     if (rows > parameters.layout.maxLines) {
       throw new Error(`Fine Caption Style ${styleId} constructs ${rows} rows for a Cue whose maximum is ${parameters.layout.maxLines}`);
     }
@@ -722,14 +731,18 @@ function cueElements(
       { name: "display", value: "flex" },
       { name: "justify-content", value: parameters.layout.textAlign === "left" ? "flex-start"
         : parameters.layout.textAlign === "right" ? "flex-end" : "center" },
-      { name: "left", value: placementAnimation === undefined ? `${compactNumber(parameters.placement.x * 100)}%` : "0px" },
+      { name: "left", value: placementAnimation === undefined
+        ? `${compactNumber(within.xPx + parameters.placement.x * within.widthPx)}px`
+        : "0px" },
       { name: "position", value: "absolute" },
-      { name: "top", value: placementAnimation === undefined ? `${compactNumber(parameters.placement.y * 100)}%` : "0px" },
+      { name: "top", value: placementAnimation === undefined
+        ? `${compactNumber(within.yPx + parameters.placement.y * within.heightPx)}px`
+        : "0px" },
       ...(parameters.placement.height === undefined ? [] : [
-        { name: "height", value: `${compactNumber(parameters.placement.height * 100)}%` },
+        { name: "height", value: `${compactNumber(parameters.placement.height * within.heightPx)}px` },
       ] as const),
       ...(transform === undefined ? [] : [{ name: "transform", value: transform }] as const),
-      { name: "width", value: `${compactNumber(parameters.placement.width * 100)}%` },
+      { name: "width", value: `${compactNumber(parameters.placement.width * within.widthPx)}px` },
     ],
     ...(placementAnimation === undefined ? {} : { animation: placementAnimation }),
   });
@@ -766,10 +779,10 @@ function cueElements(
       { name: "border-radius", value: `${compactNumber(parameters.cueBox.radiusPx)}px` },
       { name: "border-style", value: "solid" },
       { name: "border-width", value: `${compactNumber(parameters.cueBox.borderWidthPx)}px` },
-      ...(cueGap === true ? [{ name: "column-gap", value: gapPx }] as const : []),
       { name: "direction", value: parameters.layout.direction },
-      { name: "display", value: "flex" },
-      { name: "flex-wrap", value: "wrap" },
+      { name: "display", value: "block" },
+      { name: "font-size", value: "0px" },
+      { name: "line-height", value: "0" },
       { name: "justify-content", value: parameters.layout.textAlign === "left" ? "flex-start"
         : parameters.layout.textAlign === "right" ? "flex-end" : "center" },
       { name: "max-width", value: "100%" },
@@ -781,64 +794,73 @@ function cueElements(
     ],
   });
 
+  const pushSeparator = (id: string, parent: string): void => push({
+    id, parent, kind: "text", text: " ", fonts,
+    style: [
+      { name: "display", value: "inline" },
+      { name: "font-size", value: "0px" },
+      { name: "letter-spacing", value: gapPx },
+      { name: "line-height", value: "0" },
+      { name: "white-space", value: "normal" },
+    ],
+  });
+
   if (parameters.activeBox.mode === "trail" && parameters.activeBox.continuity === "joined") {
-    for (const [prefixIndex, atom] of atoms.entries()) {
-      const timing = atomFrames.get(atom.id);
-      if (timing === undefined) throw new Error(`Fine Caption is missing timing for Atom ${atom.id}`);
-      const next = atoms[prefixIndex + 1];
+    // Fine owns this drawing program. The renderer only executes its existing HtmlVisual
+    // format; it learns nothing about captions, activation units or their layout rules.
+    push({
+      id: "joined-boxes", parent: "cue", kind: "program",
+      style: [
+        { name: "position", value: "absolute" }, { name: "inset", value: "0" },
+        { name: "padding", value: `${compactNumber(parameters.cueBox.paddingYPx)}px ${compactNumber(parameters.cueBox.paddingXPx)}px` },
+      ],
+      program: htmlVisual({
+        html: "{{joined-layout}}" + atoms.map((_, index) => `{{joined-box-${index + 1}}}`).join(""),
+        setup: joinedBoxSetup,
+        css: ":scope { pointer-events: none; }",
+        data: {
+          wordCounts: atomWords.map(words => words.length),
+          background: parameters.activeBox.background, borderColor: parameters.activeBox.borderColor,
+          borderWidth: parameters.activeBox.borderWidthPx, radius: parameters.activeBox.radiusPx,
+          paddingX: parameters.activeBox.paddingXPx, paddingY: parameters.activeBox.paddingYPx,
+        },
+      }),
+    });
+    push({ id: "joined-layout", parent: "joined-boxes", kind: "box",
+      style: [{ name: "visibility", value: "hidden" }],
+      attributes: [{ name: "data-fine-box-layout", value: "" }],
+    });
+    // The complete stationary Cue supplies layout, including the inactive suffix. Its actual
+    // word fragments determine the background; decoration contributes no width to text flow.
+    for (const [index, words] of atomWords.entries()) {
+      if (index > 0 && rowStarts.has(index)) push({ id: `joined-break-${index}`, parent: "joined-layout", kind: "box",
+        style: [{ name: "display", value: "block" }, { name: "height", value: "0" }],
+      });
+      if (!rowStarts.has(index) && words[0]!.separatorBefore === " ") pushSeparator(`joined-gap-${index}`, "joined-layout");
+      const groupId = `joined-group-${index}`;
+      push({ id: groupId, parent: "joined-layout", kind: "box", style: [...atomFlow(words), { name: "max-width", value: "100%" }] });
+      const gaps = wordGaps(words);
+      for (const [wordIndex, word] of words.entries()) {
+        push({ id: `${groupId}-word-${wordIndex}`, parent: groupId, kind: "text", text: word.text, fonts,
+          style: [...transparentGlyphStyle(parameters),
+            ...(uniformGap(gaps) === undefined ? spacedStyle(gaps[wordIndex] ?? false) : [])],
+          attributes: [{ name: "data-fine-box-word", value: "" }],
+        });
+      }
+    }
+    for (const [index, atom] of atoms.entries()) {
+      const timing = atomFrames.get(atom.id)!;
+      const next = atoms[index + 1];
       const nextStart = next === undefined ? durationFrames : atomFrames.get(next.id)?.start;
       if (nextStart === undefined) throw new Error("Fine Caption is missing timing for the next Atom");
-      // A no-break space inside an atom keeps its words on one row; the boundaries between atoms
-      // take an ordinary space. Both are spaced only where the surfaces meeting there call for one.
-      const prefixText = joinSurfaces(
-        atoms.slice(0, prefixIndex + 1).map((prefixAtom, index) => {
-          for (const wordId of prefixAtom.wordIds) {
-            if (!wordText.has(wordId)) throw new Error(`Fine Caption Atom references unknown word ${wordId}`);
-          }
-          return joinSurfaces(atomSurfaces[index] ?? [], "\u00A0");
-        }),
-        " ",
-      );
-      const layerId = `joined-box-${prefixIndex + 1}`;
-      push({
-        id: layerId,
-        parent: "cue",
-        kind: "box",
-        style: [
-          { name: "box-sizing", value: "border-box" },
-          { name: "direction", value: parameters.layout.direction },
-          { name: "inset", value: "0" },
-          { name: "padding", value: `${compactNumber(parameters.cueBox.paddingYPx)}px ${compactNumber(parameters.cueBox.paddingXPx)}px` },
-          { name: "position", value: "absolute" },
-          { name: "text-align", value: parameters.layout.textAlign },
-        ],
+      push({ id: `joined-box-${index + 1}`, parent: "joined-boxes", kind: "box",
+        style: [{ name: "position", value: "absolute" }, { name: "inset", value: "0" }],
         animation: activeBoxAnimation(parameters, timing.start, nextStart, durationFrames, "current"),
         attributes: [{ name: "data-caption-active-box", value: "joined" }],
-      });
-      push({
-        id: `${layerId}-text`,
-        parent: layerId,
-        kind: "text",
-        text: prefixText,
-        style: [
-          ...transparentGlyphStyle(parameters).filter(({ name }) => name !== "white-space"),
-          { name: "-webkit-box-decoration-break", value: "clone" },
-          { name: "background", value: parameters.activeBox.background },
-          { name: "border-color", value: parameters.activeBox.borderColor },
-          { name: "border-radius", value: `${compactNumber(parameters.activeBox.radiusPx)}px` },
-          { name: "border-style", value: "solid" },
-          { name: "border-width", value: `${compactNumber(parameters.activeBox.borderWidthPx)}px` },
-          { name: "box-decoration-break", value: "clone" },
-          { name: "display", value: "inline" },
-          { name: "padding", value: `${compactNumber(parameters.activeBox.paddingYPx)}px ${compactNumber(parameters.activeBox.paddingXPx)}px` },
-          { name: "white-space", value: "normal" },
-        ],
-        fonts,
       });
     }
   }
 
-  let wordsOnLine = 0;
   for (const [atomIndex, atom] of atoms.entries()) {
     const timing = atomFrames.get(atom.id);
     if (timing === undefined) throw new Error(`Fine Caption is missing timing for Atom ${atom.id}`);
@@ -848,22 +870,20 @@ function cueElements(
     const surfaces = atomSurfaces[atomIndex] ?? [];
     // The base glyphs and the activated copy stacked over them are laid out from this one list, so
     // the karaoke wipe keeps sitting on the letterforms it reveals.
-    const gaps = wordGaps(surfaces);
+    const gaps = wordGaps(atomWords[atomIndex]!);
     const wordGap = uniformGap(gaps);
     const entryId = `${atomId}-entry`;
     const loopId = `${atomId}-loop`;
     const responseId = `${atomId}-response`;
-    if (parameters.layout.maxWordsPerLine !== undefined
-      && wordsOnLine > 0
-      && wordsOnLine + atom.wordIds.length > parameters.layout.maxWordsPerLine) {
+    if (atomIndex > 0 && rowStarts.has(atomIndex)) {
       push({
         id: `line-break-${atomIndex}`,
         parent: "cue",
         kind: "box",
-        style: [{ name: "flex-basis", value: "100%" }, { name: "height", value: "0" }],
+        style: [{ name: "display", value: "block" }, { name: "height", value: "0" }],
       });
-      wordsOnLine = 0;
     }
+    if (!rowStarts.has(atomIndex) && atomGaps[atomIndex]) pushSeparator(`gap-${atomIndex}`, "cue");
     const entryAnimation = atomLifecycleAnimation(parameters, timing.start, timing.end, durationFrames);
     const atomLoop = parameters.motion.loopTarget === "active-atom"
       ? loopAnimation(parameters, durationFrames, activationTiming) : undefined;
@@ -880,8 +900,6 @@ function cueElements(
       style: [
         { name: "display", value: "inline-flex" },
         { name: "min-width", value: "0" },
-        // A row that wraps opens at its own edge, so an atom that starts one carries no margin.
-        ...(cueGap === undefined && wordsOnLine > 0 ? spacedStyle(atomGaps[atomIndex] ?? false) : []),
         { name: "transform-origin", value: "center center" },
       ],
       ...(entryAnimation === undefined ? {} : { animation: entryAnimation }),
@@ -913,13 +931,8 @@ function cueElements(
       parent: responseId,
       kind: "box",
       style: [
-        ...(wordGap === true ? [{ name: "column-gap", value: gapPx }] as const : []),
-        { name: "display", value: "inline-flex" },
-        { name: "min-width", value: "0" },
-        { name: "overflow-wrap", value: "anywhere" },
+        ...atomFlow(atomWords[atomIndex]!),
         { name: "position", value: "relative" },
-        { name: "white-space", value: "normal" },
-        { name: "word-break", value: parameters.layout.wrap === "grapheme" ? "break-all" : "normal" },
       ],
       attributes: [{ name: "data-caption-atom", value: atom.id }],
     });
@@ -996,7 +1009,7 @@ function cueElements(
       }
     };
     for (const [wordIndex, wordId] of atom.wordIds.entries()) {
-      const text = wordText.get(wordId);
+      const text = wordText.get(wordId)?.text;
       if (text === undefined) throw new Error(`Fine Caption Atom references unknown word ${wordId}`);
       pushText({
         id: `${atomId}-base-${wordIndex + 1}`,
@@ -1037,7 +1050,7 @@ function cueElements(
         attributes: [{ name: kind === "glyph" ? "data-caption-karaoke" : "data-caption-active-underline", value: mode }],
       });
       for (const [wordIndex, wordId] of atom.wordIds.entries()) {
-        const text = wordText.get(wordId)!;
+        const text = wordText.get(wordId)!.text;
         pushText({
           id: `${activeId}-${wordIndex + 1}`,
           parent: activeId,
@@ -1060,7 +1073,6 @@ function cueElements(
     if (parameters.activeUnderline.mode !== "off") {
       addActivatedTextLayer("underline", parameters.activeUnderline.mode, "underline");
     }
-    wordsOnLine += atom.wordIds.length;
   }
   return elements;
 }
@@ -1070,19 +1082,22 @@ export function renderFineCaption(
   program: CaptionProgram,
   document: CaptionDocument,
   timeline: Timeline,
-  regions?: SpatialRegionTimeline,
+  within: SpatialFrame,
+  regions?: RegionEvidence,
 ): VisualTrack {
   assertFineCaptionSchedule(schedule);
   assertCaptionProgramForDocument(program, document);
   if (schedule.documentId !== document.id) throw new Error("Fine Caption received another CaptionDocument");
 
-  assertProgramSpaceIdentity(timeline);
-  if (schedule.spaceId !== timeline.id || schedule.narrativeId !== document.narrativeId) {
-    throw new Error("Fine Caption inputs belong to different Timelines or Narratives");
+  assertTimelineIdentity(timeline);
+  assertSpatialFrame(within);
+  if (schedule.timelineId !== timeline.id) {
+    throw new Error("Fine Caption inputs belong to different Timelines");
   }
   const styles = new Map(program.styles.map((style) => [style.id, style]));
-  const wordText = new Map(document.words.map((word) => [word.id, word.text]));
+  const wordText = new Map(document.words.map((word) => [word.id, word]));
   const atomById = new Map(document.units.map((atom) => [atom.id, atom]));
+  const cueById = new Map(document.cues.map((cue) => [cue.id, cue]));
   for (const style of styles.values()) {
     if (style.rendering === null) continue;
     if (style.rendering.family !== FINE_CAPTION_FAMILY) {
@@ -1090,15 +1105,18 @@ export function renderFineCaption(
     }
     assertFineCaptionParameters(style.rendering.parameters as unknown as FineCaptionParameters);
   }
-  const totalFrames = programSpaceFrameCount(timeline);
-  const regionTracks = regions === undefined ? undefined : (() => {
-    assertSpatialRegionTimeline(regions);
-    if (regions.frameCount !== totalFrames) {
-      throw new Error(`Fine Caption regions cover ${regions.frameCount} Frames but Timeline has ${totalFrames}`);
+  const totalFrames = timelineFrameCount(timeline);
+  const regionSeriesById = regions === undefined ? undefined : (() => {
+    assertRegionEvidence(regions);
+    const regionFrameCount = regions.series[0]!.frames.length;
+    if (regions.timelineId !== timeline.id || regionFrameCount !== totalFrames) {
+      throw new Error(`Fine Caption regions do not cover Timeline ${timeline.id}'s ${totalFrames} Frames`);
     }
-    return new Map(regions.tracks.map((track) => [track.id, track]));
+    return new Map(regions.series.map((series) => [series.id, series]));
   })();
-  const presents = schedule.cues.flatMap((cue) => {
+  const presents = schedule.cues.flatMap((cue, order) => {
+    const authoredCue = cueById.get(cue.cueId);
+    if (authoredCue === undefined) throw new Error(`Fine Caption Schedule references unknown authored Cue ${cue.cueId}`);
     const atoms = cue.units.map((timing) => atomById.get(timing.unitId));
     if (atoms.some((atom) => atom === undefined)) throw new Error(`Fine Caption Cue ${cue.id} references unknown Atom`);
     const resolvedAtoms = atoms.map((atom) => atom!);
@@ -1111,16 +1129,13 @@ export function renderFineCaption(
     const endFrameExclusive = Math.min(totalFrames, Math.max(startFrame + 1, measuredEnd));
     if (startFrame >= totalFrames || endFrameExclusive <= startFrame) return [];
     const durationFrames = endFrameExclusive - startFrame;
-    const trackedPlacement = regionTracks === undefined ? undefined : (() => {
-      const role = resolvedAtoms[0]?.role;
-      if (role === undefined || resolvedAtoms.some((atom) => atom.role !== role)) {
-        throw new Error(`Fine Caption Cue ${cue.id} must contain exactly one Script Role to follow regions`);
-      }
-      const track = regionTracks.get(role);
-      if (track === undefined) return undefined;
+    const trackedPlacement = regionSeriesById === undefined ? undefined : (() => {
+      const role = authoredCue.role;
+      if (role === undefined) throw new Error(`Fine Caption Cue ${cue.id} must have one Script Role to follow regions`);
+      const series = regionSeriesById.get(role);
+      if (series === undefined) return undefined;
       return {
-        frames: track.frames.slice(startFrame, endFrameExclusive),
-        canvas: regions!.canvas,
+        frames: series.frames.slice(startFrame, endFrameExclusive),
       };
     })();
     const atomFrames = new Map(cue.units.map((atom) => [atom.unitId, {
@@ -1129,14 +1144,15 @@ export function renderFineCaption(
     }]));
     return [{
       id: cue.id,
+      order,
+      z: parameters.stackingOrder,
       span: { startFrame, endFrameExclusive },
       visibility: cue.visibility,
-      stacking: { order: parameters.stackingOrder, tieBreak: `${program.id}:${cue.id}` },
-      elements: cueElements(resolvedAtoms, atomFrames, parameters, wordText, durationFrames, cue.styleId, trackedPlacement),
+      elements: cueElements(resolvedAtoms, atomFrames, parameters, wordText, durationFrames, cue.styleId, within, trackedPlacement),
     }];
   });
   const track = sealVisualTrack({
-    programSpaceId: timeline.id,
+    timelineId: timeline.id,
     visualIr: "hypit.visual-ir@1",
     id: program.id,
     presents,

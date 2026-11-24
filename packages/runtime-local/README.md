@@ -3,15 +3,38 @@
 The default local Runtime for Hypit. It owns the Worker, scheduler and active SQLite execution
 worklist. Project-owned Build Results hold finished public Outputs.
 
+This package also exports `@hypit/runtime-local/cli`, the command contribution that owns
+`runtime`, `programs`, `paths` and the internal Worker entry. The generic `@hypit/cli` Host owns
+none of that local process vocabulary: it consumes a narrow `CliRuntimeHost` port for Build,
+Result, credential and transient-execution operations. The root Hypit application explicitly
+selects this contribution and keeps one `hypit` executable.
+
 Managed Program preparation writes subprocess stdout and stderr directly to that Program's
 `install.log`, so dependency-download output is readable before installation finishes. Installation
 and startup progress expose `logPath`; failed installation reports retain it with a short error.
+Each preparation command adds its owner-supplied purpose (or executable name) and start/end time to
+the log. Command arguments and environment values are not copied into these headings.
 The files belong to the Program's configured state directory. Service output uses `program.log`
 and, on Windows, a separate `program.err.log` for stderr. Keeping installation output separate
 preserves it when Windows opens fresh service logs at startup.
 The CLI retains Program failure reasons, PIDs and log paths in `programs` and `runtime up` reports.
 Human output stays compact for successful preparation; `programs status --verbose` also shows
 ready helpers, and JSON retains the reported details independently of verbosity.
+With `--json`, preparation notices use stderr; stdout remains the final JSON result. Status reports
+existing `installationLogPath`, `logPath` and Windows `errorLogPath` separately. These paths identify
+historical files, not currently running phases.
+
+Each Program Home has OS-owned exclusion for preparation, spawning and stopping. Concurrent lifecycle
+commands for that home return the observed facts and a busy explanation; other Programs remain
+independent. The empty `lifecycle.lock` file is only a lock address. The OS releases ownership on
+command exit; no phase record, expiry, stale-lock deletion or recovery procedure is attached to it.
+This uses the Distribution's existing native binding dependency for POSIX `flock` and Windows
+exclusive file handles, rather than coordinating all services in a central table.
+
+Startup publishes `process.pid` before waiting for the probe, then releases exclusion. Repeated `up`
+observes that live process; `down` can stop it while it is still loading. A readiness observation
+timeout leaves the process alone and reports that it remains alive. This is Program lifecycle
+coordination, separate from Build execution; it does not retry or recover Builds.
 
 A Runtime Profile selects only the environmental parts that genuinely vary:
 
@@ -53,15 +76,8 @@ client supplies its temporary Resources and receives no Endpoint registry. Decla
 inside that one disposable session only. A Provider that needs durable or cross-Build quota admission must
 not opt that capability into transient execution.
 
-A project that wants a non-default Result repository owns a separate `hypit.results.json`:
-
-```json
-{
-  "format": "hypit.build-results@1",
-  "use": "@hypit/build-result-s3",
-  "config": { "bucket": "team-results", "prefix": "projects/episode-12" }
-}
-```
+Build Results belong to the project at `.hypit/results`. Archiving or moving completed Results is a
+post-Build project operation, not a Runtime repository choice.
 
 Submitting a Build stores it and returns. The Worker may advance unrelated Builds together; only the
 resources declared by their Commands constrain execution. An Endpoint instance owns its capacity by
@@ -97,12 +113,11 @@ serialized, while network actions and local work remain concurrent under their d
 HypiHub can be the explicitly selected gateway for users without their own service keys. A bound
 Provider's authentication, quota or transport error never changes that selection. Separate accounts use separate pools even when they implement the same model.
 
-Without `hypit.results.json`, the official video Distribution selects the filesystem adapter at the
-project's `.hypit/results` directory, with no cloud account or service. Runtime Local opens that default
-through the same adapter registry as an explicit `@hypit/build-result-s3` selection; it contains no
-filesystem Repository shortcut.
+The official video Distribution writes Results to the project's `.hypit/results` directory, with no
+cloud account or service. The filesystem implementation belongs to this single-host Runtime rather
+than a public adapter registry.
 Runtime working Resources remain internal and Build-local; there is no ResourceStore selector. After
-a Result has an outcome, history is read from the selected repository, not Runtime SQLite.
+a Result has an outcome, history is read from the project Result repository, not Runtime SQLite.
 The submission passes known Resource references to the Result writer, separately from the execution
 graph. Staging bytes for a running Build does not make them new Result files: external and reused
 resources keep their addresses even when a Producer embeds them inside a new Composite value.
@@ -116,14 +131,14 @@ to completed, failed and cancelled Builds alike.
 Saving a finished Result is a separate, idempotent storage action. If that write is interrupted, the
 Build keeps its already-decided outcome and reports exact operator attention. `hypit result finish
 <build-id>` performs only that pending write and active-state cleanup; it does not run the execution
-Worker, call a Producer or load Provider Endpoint packages. `hypit result discard <build-id>` is only
+Worker, call a Producer or load Provider packages. `hypit result discard <build-id>` is only
 for a submission that never became active and therefore has no Result to save.
 
 Source imports select author packages. Runtime Profile entries select only code allowed to access files,
 credentials, processes or networks. Installing a package changes neither selection.
 
 Endpoint scoping happens before activation when explicit instance IDs are supplied, or when every
-requested capability has a binding. Otherwise discovery loads the Profile's Endpoint packages to
+requested capability has a binding. Otherwise discovery loads the Profile's Provider packages to
 find eligible implementations. Thus unused service readiness is not required, but an uninstalled
 declared package can still prevent unbound discovery. `scopedProfile` owns this distinction; package
 names are not used to guess which capabilities they supply.
@@ -153,7 +168,7 @@ Profile's `dataRoot`. Each record carries time, Command and Endpoint identity. P
 and repeated progress counters do not become log entries. The latest counters remain active Runtime
 state; Provider-authored diagnostics and phase changes are durable evidence.
 
-Result finishing streams this log through the selected Repository before publishing the terminal
+Result finishing streams this log through the project Result repository before publishing the terminal
 manifest or clearing the Build working directory. Complete, failed and cancelled Builds use the same
 finishing path. A failed archive leaves Result attention and preserves the working directory; finishing
 that Result performs no external execution. Log write failures also surface at the Result boundary,
@@ -225,7 +240,12 @@ controller returned by `await host.controller()`, and calls `build(...)` on the 
 `await host.createRuntime()`. There is one production process-lifecycle path.
 
 Managed Programs have independent lifetimes. A healthy WhisperX service keeps its model loaded;
-`prepareBeforeStart` reconciles a cold installation through uv's source-aware synchronization.
+`programs prepare --endpoint <instance>` prepares selected resources without starting or stopping
+that service. Its installation probe is independent of process health, so an online service does not
+hide a newly requested language model. `programs up` prepares missing resources and starts the service
+if needed. `prepareBeforeStart` additionally reconciles a cold installation through the package
+manager's source-aware synchronization. The Provider owns the resource choices and commands;
+Runtime only invokes them under the existing lifecycle lock.
 `runtime down` stops the coordinator and asks its executors to stop; Programs are stopped separately.
 Distribution changes and shell environment changes still concern the coordinator's bootstrap process.
 Inspect active work before restarting it. Environment-backed credentials use that inherited process
@@ -241,3 +261,13 @@ capacity release and every completed Result. They use the production execution p
 This is a load experiment rather than part of every package regression. It reports fixture preparation,
 local progress, completion, executor RSS and cleanup separately; total test time also includes creating
 and removing the temporary Result repositories. Neither suite uses a completion-time performance target.
+
+
+### Credential management without reading the old value
+
+`openCredentials(endpoint)` opens only the selected Endpoint's credential control.
+`describeCredentials(endpoint)` returns its declared slots and each Store's write capability without
+resolving secrets. `credentials(endpoint)` also reads current values to report status and propagates
+read failures. Login and logout use the former: a damaged old credential cannot prevent replacement
+or deletion. Successful writes and deletions report their operation's result without rereading the
+secret. Execution still resolves credentials normally and reports Store errors.

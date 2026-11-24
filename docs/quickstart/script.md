@@ -46,7 +46,7 @@ a Script.
 - A Segment can be self-closing (`<pause/>`). An empty Segment has structure but no speech tokens; it
   does not imply silence or any default duration.
 - Segments cannot nest — every Segment is a top-level child of `<script>`.
-- Segment names follow XML naming rules: letters, digits, hyphens, underscores.
+- Segment names match `[a-z][a-z0-9_-]{0,63}`; `script` is reserved.
 
 Other components reference individual Segments via `{story.segment.opening}` and their text
 projections via `{story.segment.opening.dialogue}` or `{story.segment.opening.speech}`.
@@ -78,7 +78,7 @@ Role Cues produce different text projections:
 The dialogue `Text` includes Role Cue prefixes. Speech `Text` and the CaptionDocument strip them.
 Prompt programs feeding `seedance:ReferenceVideo` may use `{story.segment.dialogue.dialogue}` (with labels).
 Script emits `{story.caption}` as one CaptionDocument containing Display Words, N:M Alignment Units
-and authored Cue Breaks. It contains no seconds or frames.
+and authored Cues. It contains no seconds or frames.
 
 ## Dual Text
 
@@ -122,12 +122,24 @@ valid without grouping, and `||` still chooses the Cue handoff. This works for p
 in other languages too, such as `<Git Hub|>`.
 
 Here the left side also supplies speech, so markers can be written and moved there:
-`<组@beat!件化|>`. Markers and display attributes never become spoken text. An explicit spoken side
-still owns its own markers. Both sides empty is invalid.
+`<组@{beat!}件化|>`. Markers and display attributes never become spoken text. An explicit spoken side
+still owns its own markers. The explicit or shared speech must contain a spoken word; a form such
+as `<API|...>` supplies no timed correspondence and is invalid.
 
-`||` is the **Caption Cue Break** syntax. It records a boundary between complete Alignment Units;
+`||` is the **Caption Cue separator**. It ends the current Cue after a complete Alignment Unit;
 it cannot appear inside Dual Text or split an N:M unit. Cue timing is still obtained later by
-joining the CaptionDocument to the Timeline.
+projecting its peer NarrativeCaptionBinding through explicit Narrative time.
+
+### Spaces and spelling
+
+Write the display spacing you want: `是的 就是这样`, `3개월`, `3 개월`, `3D` and `3 D` remain
+distinct. Ordinary whitespace runs normalize to one space; Turn-edge whitespace and padding around
+Dual Text sides are omitted. Source newlines do not create subtitle rows. Use `||` for Caption Cues
+and the selected caption family's layout for line wrapping.
+
+Semantic markers contribute no text or space. `是的@{part}就是这样@{/part}` stays joined;
+`是的 @{part}就是这样@{/part}` keeps a space. Grouping with `<text|>` is optional and controls
+caption behavior; it is not required to protect spelling.
 
 ### Flat token attributes
 
@@ -135,20 +147,21 @@ A display word may carry one flat attribute block. The block is postfix, never n
 timing meaning:
 
 ```svml
-<HOST> This is really{emphasis,keyword} important{brand}.</HOST>
+<line><HOST>This is really{emphasis,keyword} important{brand}.</line>
 ```
 
 An entry without `=` has the value `true`; scalar values may be written as `name=value`. Caption
-maps attribute names to local word Styles, while a Selection still supplies the surrounding Unit
-Style. Attributes cannot split or wrap a Dual Alignment Unit.
+families interpret these attributes as roles for displayed words. Timed Uses select the surrounding
+Caption Style; attributes do not split, wrap or retime a Dual Alignment Unit.
 
 ### CaptionDocument vocabulary
 
-`CaptionDocument` is the Script-owned caption truth. Its named parts are:
+`CaptionDocument` is a Caption-owned display value that Script can produce from the same source. Its named parts are:
 
 - **Display Word** — one rendered lexical surface, including display punctuation;
 - **Alignment Unit** — the smallest display-to-speech correspondence, including N:M Dual Text;
-- **Cue Break** — an authored boundary after a complete Alignment Unit, written `||`.
+- **Cue** — one ordered group of complete Alignment Units. Segment and Role boundaries end Cues;
+  `||` explicitly ends the current Cue inside a turn.
 
 Punctuation is not a speech token and never receives its own timing window. Closing punctuation after
 a Dual Text attaches to the preceding Display Word (`<test | now>. here` displays as `test. here`),
@@ -162,34 +175,39 @@ marker; the value is a pair of semantic anchors, not a frame span:
 
 ```svml
 <script id="story">
-  @whole
+  @{whole}
   <opening>
-    <HOST> @problem Current tools make agents operate a timeline. @/problem
+    <HOST> @{problem} Current tools make agents operate a timeline. @{/problem}
   </opening>
 
   <answer>
-    <HOST> @solution SVML removes that editing loop. @/solution
+    <HOST> @{solution} SVML removes that editing loop. @{/solution}
   </answer>
-  @/whole~
+  @{/whole~}
 </script>
 ```
 
 ### Syntax
 
+Every marker begins with `@{` and ends with `}`; `/`, `!` and `~` are inside. Names match
+`[a-z][a-z0-9_-]{0,63}`; whitespace and nesting inside a marker are invalid. `@{beat!}` is a Moment;
+`@{part}!` opens a Selection followed by a prose exclamation mark. A marker cannot split a speech Token or its attached punctuation: write `@{beat!}“测试”`, not `“@{beat!}测试”`.
+
+
 | Marker | Meaning |
 |---|---|
-| `@id` | Open, right-absorbing (starts at the next word) |
-| `~@id` | Open, left-absorbing (starts at the previous word's end) |
-| `@/id` | Close, left-absorbing (ends at the previous word's end) |
-| `@/id~` | Close, right-absorbing (ends at the next word's start) |
+| `@{id}` | Open, right-absorbing (starts at the next word) |
+| `@{~id}` | Open, left-absorbing (starts at the previous word's end) |
+| `@{/id}` | Close, left-absorbing (ends at the previous word's end) |
+| `@{/id~}` | Close, right-absorbing (ends at the next word's start) |
 
 The `~` suffix/prefix controls whether the boundary snaps to the left or right. Default open is
 right-absorbing; default close is left-absorbing.
 
 The complete Script has exactly `2M + 2N + 2` ordered semantic anchors: two for every Token, two for
 every Segment, and the Program start/end. At the outer cuts, affinity keeps coincident meanings
-distinct: `~@id` before the first Segment chooses Program start while `@id` chooses that Segment's
-start; `@/id` after the final Segment chooses that Segment's end while `@/id~` chooses Program end.
+distinct: `@{~id}` before the first Segment chooses Program start while `@{id}` chooses that Segment's
+start; `@{/id}` after the final Segment chooses that Segment's end while `@{/id~}` chooses Program end.
 Their frames may coincide after alignment, but their author identities do not.
 
 ### Multiple named Selections
@@ -200,7 +218,7 @@ Selections are not required to nest like XML tags. They can cross each other:
 
 ```svml
 <demo>
-  <HOST> @a One @b two @/a three @/b.
+  <HOST> @{a}One @{b}two@{/a} three.@{/b}
 </demo>
 ```
 
@@ -208,8 +226,8 @@ Selection markers are zero-width and never appear in any text projection. They c
 `NarrativeSelection` with `startAnchorId` and `endAnchorId`. Script itself contains no seconds or
 frame numbers — timing comes from Timeline alignment.
 
-Other components reference Selections via `{story.selection.problem}` to bind visual content to
-semantic moments in the narrative.
+A Narrative Projection declaration references `{story.selection.problem}` and publishes a named
+absolute Window. Components consume that Window without understanding Script identities.
 
 ## Moments
 
@@ -217,20 +235,21 @@ Moments are named time **points** (not ranges):
 
 ```svml
 <ecosystem>
-  <HOST> @ranking! Image generation, video generation, captions and B-roll
+  <HOST> @{ranking!} Image generation, video generation, captions and B-roll
          all become reusable components.
 </ecosystem>
 ```
 
 | Marker | Meaning |
 |---|---|
-| `@id!` | Right-absorbing (point at the next word's start) |
-| `~@id!` | Left-absorbing (point at the previous word's end) |
+| `@{id!}` | Right-absorbing (point at the next word's start) |
+| `@{~id!}` | Left-absorbing (point at the previous word's end) |
 
 Each Moment name occurs once and compiles into one `NarrativeMoment` with an `anchorId`. Selection
 and Moment share the same name namespace — the same id cannot be used for both.
 
-Other components reference Moments via `{story.moment.ranking}`.
+A Narrative Projection declaration references `{story.moment.ranking}` and publishes a named
+absolute Instant. Components consume that Instant without understanding Script identities.
 
 ## Comments and escaping
 
@@ -260,26 +279,26 @@ A complete Script using all constructs together:
 
 ```svml
 <script id="story">
-  @whole
+  @{whole}
   <hook>
-    <HOST> @problem Girls, you need to hear this. Never let anyone take credit
-           for your work. @/problem
+    <HOST> @{problem} Girls, you need to hear this. Never let anyone take credit
+           for your work. @{/problem}
   </hook>
 
   <meeting>
-    <HOST> @solution I started sending <BCC | B C C> recaps after every
-           meeting: timestamps, decisions, who said what. @ranking! After
-           the first recap, everything changed. @/solution
+    <HOST> @{solution} I started sending <BCC | B C C> recaps after every
+           meeting: timestamps, decisions, who said what. @{ranking!} After
+           the first recap, everything changed. @{/solution}
   </meeting>
 
   <evidence>
-    <HOST> That gave me @emphasis the courage I was missing @/emphasis.
+    <HOST> That gave me @{emphasis}the courage I was missing.@{/emphasis}
   </evidence>
 
   <payoff>
     <HOST> And guess what? I'm sitting in my old boss's chair now.
   </payoff>
-  @/whole~
+  @{/whole~}
 </script>
 ```
 
@@ -291,5 +310,6 @@ This Script declares:
 - Three Selections: `whole` (entire Script), `problem`, `solution`, `emphasis`
 - One Moment: `ranking` (marks the instant "After the first recap")
 
-Downstream components reference these by name: `{story.segment.hook.dialogue}` for generation,
-`{story.selection.problem}` for B-roll timing, `{story.moment.ranking}` for a visual card reveal.
+Downstream graph nodes reference these by name: `{story.segment.hook.dialogue}` supplies generation
+text, while Narrative Projection declarations reveal `{story.selection.problem}` for B-roll timing
+and `{story.moment.ranking}` for a visual card event.

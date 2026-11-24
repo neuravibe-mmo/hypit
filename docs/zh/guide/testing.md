@@ -44,36 +44,37 @@ describe("someFunction", () => {
 ```typescript
 test("compiles the expected exports", async () => {
   const compiler = createCompiler({ root, packageContributions });
-  const workspace = await compiler.openFile("fixture.svml");
-  const result = await compiler.compileSource(workspace.entry, workspace);
+  const workspace = await compiler.openEntry("fixture.svml");
+  const result = await compiler.compileResolvedSource(workspace.entry, workspace);
   assert.equal(result.exports.length, 3);
 });
 ```
 
 ### Provider 测试
 
-在可控的伪传输边界验证请求映射、提交歧义、轮询、下载与失败语义。仓库测试不调用付费 Provider，也不以环境变量
-开启真实 API smoke/canary；一次真实调用不能证明这些失败边界，反而会引入费用、网络和外部状态噪声。
+在可控的服务 fixture 上验证请求映射、媒体传输与任务推进，包括失败行为。
+[项目 Provider 示例](https://github.com/hypit-ai/hypit/tree/main/examples/provider-package)
+包含一个生命周期测试，会收集返回的图片且不产生生成费用。真实调用使用选定服务和明确的花费范围；仅有可用密钥并不构成授权。
 
 ### 架构边界
 
 包边界由 package manifest、公开入口和共享合同表达；测试只验证边界上可观察的行为。
 仓库不再把源码文本正则当作依赖分析或架构审查的替代品。
 
-不得提交客户或品牌 fixture、凭据痕迹、付费产物、工作站绝对路径与一次性交付脚本。本机 ffmpeg、浏览器或
-OpenCV 的集成测试可以显式 opt-in；它们不得联网调用付费服务，也不进入默认测试成功的必要条件。
+不得提交客户或品牌 fixture、凭据痕迹、付费产物、工作站绝对路径与一次性交付脚本。
+通用的真实调用测试需要显式启用，不能提交密钥，且在未启用时不能产生费用。
 
 ## 受环境开关控制的测试
 
 | 命令 | 测试内容 | 前置条件 |
 |---|---|---|
 | `pnpm test:whisperx-service` | Python WhisperX 服务 | Python 3.13、uv、frozen sync |
-| `pnpm test:image-opencv` | OpenCV 图像变换 | 服务自带的解释器，位于 `services/image-opencv/.venv`；要用别的解释器就设 `HYPIT_OPENCV_PYTHON` |
+| `pnpm test:image-opencv` | OpenCV Transform 与 Compose | Provider 自带的解释器，位于 `packages/provider-image-opencv-local/runtime/.venv`；要用别的解释器就设 `HYPIT_OPENCV_PYTHON` |
 
-要运行本地 HyperFrames 浏览器渲染测试，先在当前 shell 环境中设置 `HYPIT_BROWSER_TESTS=1`，再从仓库根目录执行以下命令。需要可用的 Chrome、ffmpeg 和 ffprobe。
+要运行本地 HTML 光栅化测试，先在当前 shell 环境中设置 `HYPIT_BROWSER_TESTS=1`，再从仓库根目录执行以下命令。需要可用的 Chrome、ffmpeg 和 ffprobe。
 
 ```sh
-node --import tsx --test packages/provider-hyperframes-local/test/provider.test.ts
+node --import tsx --test packages/provider-html-local/test/provider.test.ts
 ```
 
 ## 测试 fixtures

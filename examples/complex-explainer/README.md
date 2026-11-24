@@ -68,16 +68,17 @@ explains joining exported parts. The archive also includes `productions/explaine
 | What is said, and which words motivate a change? | [Script](productions/explainer/authors/script.svml) |
 | Which raw resources, clock and canvas are used? | [Assets](productions/explainer/authors/assets.svml) |
 | What directed the accepted performance? | [Direction](productions/explainer/authors/direction.svml), [performance Recipe](productions/explainer/recipes/performance.svs) |
-| How are Takes, Uses, events and contributions assembled? | [Main Source](productions/explainer/authors/main.svml) |
+| How are media occurrences, Uses, events and contributions assembled? | [Main Source](productions/explainer/authors/main.svml) |
 | How does the Caption look? | [Composition Recipe](productions/explainer/recipes/composition.svs) |
 | How does each coordinated scene behave? | [Web scenes](packages/web-scenes/README.md) |
 | How do the presenter and opening graphics move? | [Opening system](packages/opening-system/README.md) |
 | How are cue boundaries and one-line captions handled? | [Caption package](packages/single-line-captions/README.md) |
+| Where does the shared palette live without becoming another Track? | [Visual language](packages/visual-language/README.md) |
 | Which existing material should a new Build use? | [Render Run](productions/explainer/runs/render.svrun) |
 
 Generated and normalized Outputs remain in the entry Source where the Run can satisfy them explicitly.
-Changing a cue break or graphic event does not require replacing the performance. A rewrite of the
-spoken words is different: supply a new Take with timing for that Script and select it in the Run.
+Changing a Cue boundary or graphic event does not require replacing the performance. A rewrite of the
+spoken words is different: supply new performance media with timing for that Script and select it in the Run.
 The retained generation declarations show the original direction but are not invoked by the default
 Run. Configure an explicitly chosen Model/Provider path before requesting new material.
 
@@ -90,7 +91,10 @@ Tracks. The scene's state is computed from frame time, making direct seeking and
 possible. Script Moments locate spoken changes; authored durations shape how those changes unfold.
 
 Read the [Treatment](productions/explainer/TREATMENT.md) and
-[craft notes](productions/explainer/CRAFT-NOTES.md) for the practical reasoning. Components use public
+[craft notes](productions/explainer/CRAFT-NOTES.md) for the practical reasoning: recovering behavior
+beyond a list of objects, the style change, scene boundaries, semantic events, framing and review.
+The [presenter-led visual explainer playbook](https://github.com/hypit-ai/hypit/blob/main/skills/hypit/references/playbooks/formats/presenter-led-explainer.md)
+draws out the whole-work relationship for other productions. Components use public
 Author Package and Companion interfaces; Studio and Core contain no dispatch for this example.
 
 ## Materials and editorial copy

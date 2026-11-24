@@ -1,6 +1,7 @@
-import { assertSpeechEvidenceAudioIdentity } from "@hypit/speech";
-import type { SpeechEvidenceAudio } from "@hypit/speech";
+import { assertSpeechEvidenceAudioIdentity } from "@hypit/speech-evidence";
+import type { SpeechEvidenceAudio } from "@hypit/speech-evidence";
 import type { WhisperXAlignmentRequest, WhisperXLanguage } from "./types.js";
+import { parseWhisperXLanguage } from "./types.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -11,12 +12,13 @@ export function verifyWhisperXAlignmentRequest(value: unknown): WhisperXAlignmen
   assert(value !== null && typeof value === "object" && !Array.isArray(value),
     "WhisperX alignment request must be an object");
   const request = value as WhisperXAlignmentRequest;
-  assert(request.audio?.kind === "blob"
+  assert(typeof request.domainId === "string" && request.domainId.length > 0
+    && request.audio?.kind === "blob"
     && request.audio.mediaType === "audio/wav"
     && Number.isSafeInteger(request.sampleFrames)
-    && request.sampleFrames > 0
-    && (request.language === "en" || request.language === "zh" || request.language === "es"),
+    && request.sampleFrames > 0,
   "WhisperX alignment request is invalid");
+  parseWhisperXLanguage(request.language);
   return request;
 }
 
@@ -62,8 +64,9 @@ export function whisperXRequestForEvidenceAudio(
 ): WhisperXAlignmentRequest {
   assertSpeechEvidenceAudioIdentity(evidence);
   return {
+    domainId: evidence.domainId,
     audio: evidence.artifact,
     sampleFrames: evidence.sampleFrames,
-    language: options.language,
+    language: parseWhisperXLanguage(options.language),
   };
 }

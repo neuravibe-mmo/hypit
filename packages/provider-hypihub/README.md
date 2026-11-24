@@ -4,6 +4,17 @@ Thin Hypit Runtime Provider for a HypiHub deployment. It is an optional default 
 paid generation and WhisperX alignment requests. Select it for a chosen HypiHub account, with OAuth
 or an API key in the configured Credential Store; other Providers remain ordinary Profile choices.
 
+The implementation uses public Hypit Provider APIs and the Generation and Speech Evidence packages.
+It also declares an explicit peer on `@hypit/whisperx`, whose capability identity, request validation and
+wire-response interpretation it implements remotely. Compatible published releases use an ordinary
+SemVer range; the consuming project's npm/pnpm lockfile fixes the installed pair. Hypit performs no
+Provider download, version resolution or Build-time upgrade. The Provider reads its own package
+version for its User-Agent and does not inherit the Hypit Distribution version.
+
+The official Distribution currently obtains this Provider as a default npm dependency because its
+starter Runtime Profile selects HypiHub. The Profile selection and the npm dependency are separate:
+another Distribution may omit it, and a project may install a compatible version explicitly.
+
 `doctor` is read-only. If a stored OAuth access token needs refresh, it reports that account access
 and refresh validity remain unchecked; it does not rotate credentials or conclude that their Store
 is read-only. Authorized execution and pricing reads retain the normal refresh-and-persist path.
@@ -16,9 +27,27 @@ admits them into the current Build's working byte area. Image references use Hyp
 `reference_image_urls`, `reference_videos`, and `reference_audios` fields. A single reference video
 remains in `reference_videos`; `ref_video_url` is reserved for a model's source-video port. First/last-frame images use `first_frame` and `last_frame`.
 
-Seedance 2.5 (`@hypit/seedance` model `2.5`) maps to `bytedance/seedance-2-5` and supports
+`@hypit/bach@1#bach-1.0-pro` maps to `bach/bach-1.0-pro` on `POST /v1/videos`.
+It accepts text prompts, first/last-frame images, and reference images with optional reference audio.
+`duration` maps to `seconds`, `generateAudio` to `generate_audio`, and `seed` is preserved.
+Output resolution is `1080p`. Durations from 5 to 16 seconds retain their decimal value.
+The service's price card determines billed seconds. Frame requests use the service's `auto` aspect ratio.
+
+The HypiHub Bach Endpoint requires references without `startTime` offsets. Reference videos are
+unavailable while upstream input billing is being verified. These requests return unsupported
+before upload or generation; the Model package retains its complete reference vocabulary for
+Endpoints that support it. The configured account's model catalogue determines Bach availability.
+
+Seedance 2.5 (`@hypit/seedance` model `2.5`) maps to `seedance-2.5` and supports
 `480p`, `720p` and `1080p`. The Provider passes the authored `resolution` to `POST /v1/videos`;
 omitting it in the Seedance Surface defaults to `720p`.
+
+`@hypit/pixverse` models `pixverse-v6` and `pixverse-c1` map to `pixverse/v6` and `pixverse/c1` on
+`POST /v1/videos`. The model's own `quality` band travels as `resolution` and its duration as
+`seconds`; frames use `first_frame` and `last_frame`, image references use `reference_image_urls`,
+and V6's video references use `reference_videos`. A reference-video request carries no `seconds`.
+This body has no field for V6's `seed` or `multi-clip`, so a request that states either is refused
+by name before any reference is uploaded.
 
 The current HypiHub GPT Image 2 route has these service-specific limits:
 
@@ -31,10 +60,44 @@ The current HypiHub GPT Image 2 route has these service-specific limits:
 HypiHub owns this support check independently: it leaves the GPT Image model package unchanged. When the service surface changes, this Provider can change without changing
 the model or another Provider.
 
-Model identity is preserved across input modes: Seedream 5 Lite references use the Lite image-edit
-route, and Grok 1.5 Preview remains the Preview model. A deployment's current catalogue may offer
+Model identity and input mode are separate. The mapping uses HypiHub's canonical model names:
+`gpt-image-2`, `seedream-5-lite`, `minimax-h3`, `grok-imagine-video`, `pixverse/v6`,
+`pixverse/c1` and the individual Seedance names.
+An image request without references uses `/images/generations`; image edits use `/images/edits`
+with the same model name. Video requests use `/videos`, preserving reference images, reference
+videos and first/last frames in their distinct fields. Old operation-specific names are not needed
+to express these modes; compatibility with previously released clients belongs to the service.
+
+Seedream 5 Lite remains Lite across input modes, and Grok 1.5 Preview remains Preview.
+A deployment's current catalogue may offer
 newer models or omit one implemented here. Availability and unsupported-input errors retain their
 service explanation; they do not imply expired credentials or authorize substituting another model.
+
+Before resolving or uploading references, the Provider prepares the exact model and operation from
+the authored ports and its mapping, then queries that model's authenticated directory entry. Image
+editing is determined from the mapped media inputs, without manufacturing placeholder URLs or
+uploading to discover the request mode. The same preparation serves images, videos and speech.
+The request is then translated with real reference URLs and submitted to the selected operation.
+These are internal Provider functions; Author Sources, CLI commands and Runtime scheduling are unchanged.
+
+Progress identifies the directory query, request preparation and submission. A directory failure
+retains the model, operation and service evidence, and states that this invocation uploaded no
+references and submitted no generation. A missing or malformed operation list leaves support unknown;
+an explicit list without the requested operation reports the actual list. No alternative model,
+operation or account is attempted. Directory support alone does not establish balance, every input
+combination or eventual generation success. Preparation failure also reports that generation was not
+submitted; an interrupted submission retains its actual evidence without claiming no remote work exists.
+
+The Provider interprets HypiHub's [HTTP errors](https://hypit.ai/api-reference/errors/) and
+[job errors](https://hypit.ai/api-reference/jobs/) locally. Failures retain the service code,
+HTTP method/route/status, requested model and `X-Request-Id` when available, plus the public reason.
+`Retry-After` remains evidence and does not start another generation attempt. Job failures retain
+`error_code`, `error` and their receipt even when the create response is already terminal.
+Known error messages are not cut to a fixed prefix; only an unstructured non-JSON response uses
+a marked excerpt. Unrelated response fields and signed asset URLs are not diagnostic content.
+Runtime and Result retain ordinary failure codes/messages without interpreting HypiHub fields.
+Immediate Endpoint exceptions keep the same evidence in their message. A `401` alone does not
+choose OAuth over API-key configuration or establish that another login will fix the account.
 
 For moving portraits, [Volcengine Matting](../volcengine-matting/README.md) maps
 `@hypit/volcengine-matting@1#matte-portrait-video` to `POST /v1/videos` with
@@ -42,27 +105,33 @@ For moving portraits, [Volcengine Matting](../volcengine-matting/README.md) maps
 Both formats carry transparency. The source video uses the same upload transport as other video
 references; the returned job uses the same polling and asset collection lifecycle. The selected
 account's `/v1/models` establishes availability. The processed video enters ordinary Normalize,
-then either semantic alignment for a Script performance or Media Track for B-roll.
-
-[Background Removal](../background-removal/README.md) declares a separate single-image capability.
-This Provider does not currently implement it; select a project Provider for that operation.
+then a Visual Clip or another ordinary media consumer; add semantic alignment separately when a
+Script relationship needs positions inside that performance.
 
 Runtime Profile example:
 
 ```json
 {
+  "format": "hypit.runtime-local@1",
+  "dataRoot": ".hypit/runtimes/local",
+  "credentials": {
+    "platform": {
+      "use": "@hypit/credential-store-local"
+    }
+  },
   "endpoints": {
     "hypihub.default": {
       "use": "@hypit/provider-hypihub",
       "pool": "hypihub.default",
       "config": {
         "baseUrl": "https://hypit.ai",
-        "apiKey": { "store": "os", "key": "hypihub.oauth" },
+        "apiKey": { "store": "platform", "key": "hypihub.oauth" },
         "defaultConcurrency": 3,
         "pollIntervalMs": 10000
       }
     }
-  }
+  },
+  "bindings": {}
 }
 ```
 
@@ -82,9 +151,11 @@ size and part concurrency, retries a failed part with a fresh signed URL, comple
 one upload, and then passes the returned HTTPS URL to generation or transcription. Signing requests
 contain at most the service's 128-part limit; all batches belong to the same upload. One
 Resource identity with the same declared person-reference classification is uploaded once within one Runtime operation. Hypit keeps no upload catalog or
-cross-Build cache. Seedance visual references can carry `personReference` in their media fields;
+cross-Build cache. Seedance visual references require boolean `personReference` in their media fields;
 the mapping declares it as a resource-transport field and the upload session receives
-`is_person_reference`, preserving true, false and omission. It stays out of the generation body.
+`is_person_reference`, preserving true and false. It stays out of the generation body.
+This covers reference images, reference videos, and first/last frames for every declared Seedance
+variant. Seedance rejects omission before upload; no automatic face detection is requested.
 HypiHub stores the authored classification and prepares the applicable upstream person reference;
 this Provider does not detect faces or select an upstream private-avatar group.
 
@@ -122,8 +193,10 @@ catalog to verify configured capabilities; ordinary preflight never makes that r
 declares HypiHub's public pricing page, `https://hypit.ai/commercial/pricing/`, as its price source.
 For each selected Need, `readPricing` resolves the corresponding HypiHub model and returns the service's
 authenticated `GET /v1/pricing?model=<model>` response unchanged together with that URL. It covers
-generation, alignment, Voice Design and Voice Clone through the same mechanism;
-the Provider does not maintain a second list of billing formulas or calculate a request total.
+generation, alignment, Voice Design and Voice Clone through the same mechanism. The document's
+per-operation prices are retained alongside its default price, including when references are still
+pending. A model's default price is not a quote for every input mode. The Provider does not maintain
+a second list of billing formulas or calculate a request total.
 
 The Provider declares its implemented speech capabilities alongside image, video and alignment.
 Voice Design produces an accepted voice-reference Resource, and Voice Clone uses that
@@ -148,7 +221,7 @@ Execution policy remains local to this Provider:
 | `requestTimeoutMs` | 300 seconds | ordinary Provider HTTP requests |
 | `oauthRequestTimeoutMs` | 30 seconds | OAuth token exchange and refresh |
 | `pricingRequestTimeoutMs` | 30 seconds | authenticated pricing requests |
-| `operationTimeoutMs` | 20 minutes | one remote asynchronous operation |
+| `operationTimeoutMs` | 20 minutes | how long this Provider observes one asynchronous operation; expiry does not cancel the remote job |
 | `uploadConcurrency` | 8 | whole file sessions per origin/credential within this process |
 | `uploadPartTimeoutMs` | 5 minutes | one upload part |
 | `uploadPartAttempts` | 3 | attempts for one upload part |
@@ -166,8 +239,11 @@ admission budgets. Each accepts `concurrency` and `rate: { limit, periodMs }`, s
 These limits count lifecycle actions; Provider-specific upload parts and HTTP requests remain inside
 those actions. Synchronous speech and transcription retain their ordinary request capacity.
 
-A submission, polling or collection error ends the local attempt. Known job IDs and credential
-references remain available in Result receipts; a timeout with no ID is recorded as such. A job can
+A submission or collection error ends the local attempt. During polling, transport failures and HTTP
+429/5xx preserve the same job handle and schedule another read; a standard `Retry-After` is honored,
+but the wake time never passes the original `operationTimeoutMs` deadline. Credential, response and
+other non-retryable errors still end the attempt. Known job IDs and credential references remain
+available in Result receipts; a timeout with no ID is recorded as such. A job can
 be inspected at `/jobs/<id>` and its generated assets at `/jobs/<id>/assets` on the selected API base.
 The next production attempt uses a new Run and Build. Runtime bindings never switch from a user's
 own Provider to HypiHub after a key, quota or transport failure.

@@ -1,4 +1,4 @@
-import { artifactTypes } from "@hypit/artifact";
+import { blobTypes } from "@hypit/hypit/blob";
 import {
   generationPort,
   sealGenerationMediaBinding,
@@ -9,20 +9,16 @@ import type {
   GenerationMediaRole,
   GenerationPortTable,
 } from "@hypit/generation";
-import { exactModelMediaInputNames, exactModelTextInputName } from "@hypit/model-kit";
-import type { ExactModelEndpoint, ExactModelMediaInput } from "@hypit/model-kit";
-import type { CanonicalValue } from "@hypit/protocol";
-import { textTypes, verifyText } from "@hypit/text";
-import type {
-  MarkupAttributeValue,
-  StructuredElement,
-  StructuredSurfaceHandler,
-  SurfaceResolvedReference,
-} from "@hypit/markup";
+import { exactModelMediaInputNames, exactModelTextInputName } from "@hypit/generation/model";
+import type { ExactModelEndpoint, ExactModelMediaInput } from "@hypit/generation/model";
+import { textTypes, verifyText } from "@hypit/hypit/text";
+import type { CanonicalValue } from "@hypit/hypit/protocol";
+import type { MarkupAttributeValue, StructuredElement, StructuredSurfaceHandler, SurfaceResolvedReference } from "@hypit/hypit/markup";
 
 import { createSeedanceAssembledGenerationFragment } from "./fragment.js";
 import { seedanceEndpoints, seedancePorts } from "./index.js";
 import type { SeedanceModel, SeedancePortMap } from "./index.js";
+import { validateSeedanceAudio } from "./validation.js";
 
 type MediaInput = {
   readonly port: "referenceImage" | "referenceVideo" | "referenceAudio" | "firstFrame" | "lastFrame";
@@ -104,11 +100,12 @@ function mediaReference(
   role: GenerationMediaRole,
   subject: string,
 ): SurfaceResolvedReference {
-  if (!sameType(reference.type, artifactTypes.blob)) throw new Error(`${subject} must reference a BlobArtifact`);
+  if (!sameType(reference.type, blobTypes.blob)) throw new Error(`${subject} must reference a Blob`);
   const value = reference.record?.value;
   if (value !== undefined && (value.kind !== "blob" || !value.mediaType.startsWith(`${role}/`))) {
     throw new Error(`${subject} must reference ${role} media`);
   }
+  if (value?.kind === "blob" && role === "audio") validateSeedanceAudio(value, subject);
   return reference;
 }
 
@@ -144,8 +141,10 @@ function booleanAttribute(element: StructuredElement, name: string, fallback: bo
 }
 
 function personReferenceFields(element: StructuredElement, name: string) {
-  return element.attributes[name] === undefined ? undefined
-    : { personReference: booleanAttribute(element, name, false) };
+  if (element.attributes[name] === undefined) {
+    throw new Error(`${element.name}.${name} is required for this visual reference; set true if it contains a person, false otherwise`);
+  }
+  return { personReference: booleanAttribute(element, name, false) };
 }
 
 function enumeratedPort(table: GenerationPortTable, name: string): readonly (string | number)[] {
@@ -215,8 +214,8 @@ function referenceInputs(
     const kinds = accepted.filter((kind) => child.attributes[kind] !== undefined);
     if (kinds.length !== 1) throw new Error(`${child.name} requires exactly one of ${accepted.join(", ")}`);
     const role = kinds[0]!;
-    const fields = personReferenceFields(child, "person-reference");
-    if (role === "audio" && fields !== undefined) throw new Error(`${child.name}.person-reference applies to image or video, not audio`);
+    if (role === "audio" && child.attributes["person-reference"] !== undefined) throw new Error(`${child.name}.person-reference applies to image or video, not audio`);
+    const fields = role === "audio" ? undefined : personReferenceFields(child, "person-reference");
     result.push({
       ...(fields === undefined ? {} : { fields }),
       role,
@@ -240,13 +239,12 @@ function frameInputs(
 ): MediaInput[] {
   const first = mediaReference(resolved(element, "first-frame", resolveReference), "image", `${element.name}.first-frame`);
   const firstFields = personReferenceFields(element, "first-frame-person-reference");
-  const result: MediaInput[] = [{ port: "firstFrame", role: "image", source: first, ...(firstFields === undefined ? {} : { fields: firstFields }) }];
-  const lastFields = personReferenceFields(element, "last-frame-person-reference");
-  if (lastFields !== undefined && element.attributes["last-frame"] === undefined) throw new Error(`${element.name}.last-frame-person-reference requires last-frame`);
+  const result: MediaInput[] = [{ port: "firstFrame", role: "image", source: first, fields: firstFields }];
+  if (element.attributes["last-frame-person-reference"] !== undefined && element.attributes["last-frame"] === undefined) throw new Error(`${element.name}.last-frame-person-reference requires last-frame`);
   if (element.attributes["last-frame"] !== undefined) {
     result.push({
       port: "lastFrame",
-      ...(lastFields === undefined ? {} : { fields: lastFields }),
+      fields: personReferenceFields(element, "last-frame-person-reference"),
       role: "image",
       source: mediaReference(resolved(element, "last-frame", resolveReference), "image", `${element.name}.last-frame`),
     });

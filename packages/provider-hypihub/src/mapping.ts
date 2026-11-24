@@ -1,4 +1,4 @@
-import type { CapabilityRef, ModuleRef } from "@hypit/protocol";
+import type { CapabilityRef, ModuleRef } from "@hypit/hypit/protocol";
 import type { GenerationWireMapping } from "@hypit/generation";
 
 /** HypiHub model IDs and the normalized request fields they accept. */
@@ -8,12 +8,14 @@ const NANO_BANANA: ModuleRef = { name: "@hypit/nano-banana", version: "1" };
 const SEEDREAM: ModuleRef = { name: "@hypit/seedream", version: "1" };
 const MINIMAX: ModuleRef = { name: "@hypit/minimax-h3", version: "1" };
 const GROK: ModuleRef = { name: "@hypit/grok-imagine", version: "1" };
+const PIXVERSE: ModuleRef = { name: "@hypit/pixverse", version: "1" };
+const BACH: ModuleRef = { name: "@hypit/bach", version: "1" };
 const MIMO_SPEECH: ModuleRef = { name: "@hypit/mimo-speech", version: "1" };
 const FISHAUDIO_SPEECH: ModuleRef = { name: "@hypit/fishaudio-speech", version: "1" };
 const ELEVENLABS_SPEECH: ModuleRef = { name: "@hypit/elevenlabs-speech", version: "1" };
 
-const seedance = (name: string, model: string): GenerationWireMapping => ({
-  capability: { module: SEEDANCE, name }, result: "video", routes: [{ model }],
+const seedance = (name: string): GenerationWireMapping => ({
+  capability: { module: SEEDANCE, name }, result: "video", routes: [{ model: name }],
   fields: {
     prompt: { as: "value", field: "prompt" },
     referenceImage: { as: "urlArray", field: "reference_image_urls", resourceFields: ["personReference"] },
@@ -29,7 +31,48 @@ const seedance = (name: string, model: string): GenerationWireMapping => ({
   },
 });
 
+/**
+ * PixVerse V6 and C1 on `POST /v1/videos`. Both take the same body; V6 additionally accepts
+ * reference videos, which carry the length of the run in place of `seconds`, a sampling `seed`
+ * and the `multi_clip` switch. The model's own `quality` band is HypiHub's `resolution`.
+ */
+const pixverse = (name: string, model: string): GenerationWireMapping => ({
+  capability: { module: PIXVERSE, name }, result: "video", routes: [{ model }],
+  fields: {
+    prompt: { as: "value", field: "prompt" },
+    firstFrame: { as: "url", field: "first_frame" },
+    lastFrame: { as: "url", field: "last_frame" },
+    referenceImage: { as: "urlArray", field: "reference_image_urls" },
+    ...(name === "pixverse-v6" ? {
+      referenceVideo: { as: "urlArray" as const, field: "reference_videos" },
+      seed: { as: "value" as const, field: "seed" },
+      multiClip: { as: "value" as const, field: "multi_clip" },
+    } : {}),
+    duration: { as: "value", field: "seconds" },
+    quality: { as: "value", field: "resolution" },
+    aspectRatio: { as: "value", field: "aspect_ratio" },
+    generateAudio: { as: "value", field: "generate_audio" },
+  },
+});
+
 export const hypiHubMappings: readonly GenerationWireMapping[] = [
+  {
+    capability: { module: BACH, name: "bach-1.0-pro" }, result: "video", routes: [{ model: "bach/bach-1.0-pro" }],
+    fields: {
+      prompt: { as: "value", field: "prompt" },
+      duration: { as: "value", field: "seconds" },
+      resolution: { as: "value", field: "resolution" },
+      aspectRatio: { as: "value", field: "aspect_ratio" },
+      generateAudio: { as: "value", field: "generate_audio" },
+      seed: { as: "value", field: "seed" },
+      firstFrame: { as: "url", field: "first_frame" },
+      lastFrame: { as: "url", field: "last_frame" },
+      // Each reference may carry a `start_time` offset, sent as `{ url, start_time }`.
+      referenceImage: { as: "itemObject", field: "reference_image_urls", urlKey: "url", fieldKeys: { startTime: "start_time" } },
+      referenceVideo: { as: "itemObject", field: "reference_videos", urlKey: "url", fieldKeys: { startTime: "start_time" } },
+      referenceAudio: { as: "itemObject", field: "reference_audios", urlKey: "url", fieldKeys: { startTime: "start_time" } },
+    },
+  },
   {
     capability: { module: { name: "@hypit/volcengine-matting", version: "1" }, name: "matte-portrait-video" },
     result: "video", routes: [{ model: "matte-portrait-video" }],
@@ -38,15 +81,14 @@ export const hypiHubMappings: readonly GenerationWireMapping[] = [
       format: { as: "value", field: "format", whenAbsent: "WEBM" },
     },
   },
-  seedance("seedance-2", "bytedance/seedance-2"),
-  seedance("seedance-2-fast", "bytedance/seedance-2-fast"),
-  seedance("seedance-2-mini", "bytedance/seedance-2-mini"),
-  seedance("seedance-2.5", "bytedance/seedance-2-5"),
+  seedance("seedance-2"),
+  seedance("seedance-2-fast"),
+  seedance("seedance-2-mini"),
+  seedance("seedance-2.5"),
+  pixverse("pixverse-v6", "pixverse/v6"),
+  pixverse("pixverse-c1", "pixverse/c1"),
   {
-    capability: { module: GPT_IMAGE, name: "gpt-image-2" }, result: "image", routes: [
-      { model: "gpt-image-2-image-to-image", whenPresent: ["images"] },
-      { model: "gpt-image-2-text-to-image" },
-    ],
+    capability: { module: GPT_IMAGE, name: "gpt-image-2" }, result: "image", routes: [{ model: "gpt-image-2" }],
     fields: {
       prompt: { as: "value", field: "prompt" },
       aspectRatio: { as: "value", field: "aspect_ratio" },
@@ -66,10 +108,7 @@ export const hypiHubMappings: readonly GenerationWireMapping[] = [
     },
   })),
   {
-    capability: { module: SEEDREAM, name: "seedream-5-lite" }, result: "image", routes: [
-      { model: "seedream/5-lite-image-to-image", whenPresent: ["images"] },
-      { model: "seedream/5-lite-text-to-image" },
-    ],
+    capability: { module: SEEDREAM, name: "seedream-5-lite" }, result: "image", routes: [{ model: "seedream-5-lite" }],
     fields: {
       prompt: { as: "value", field: "prompt" },
       aspectRatio: { as: "value", field: "aspect_ratio" },
@@ -80,13 +119,7 @@ export const hypiHubMappings: readonly GenerationWireMapping[] = [
     },
   },
   {
-    capability: { module: MINIMAX, name: "minimax-h3" }, result: "video", routes: [
-      { model: "minimax-h3/image-to-video", whenPresent: ["lastFrame"] },
-      { model: "minimax-h3/image-to-video", whenPresent: ["firstFrame"] },
-      { model: "minimax-h3/reference-to-video", whenPresent: ["referenceImage"] },
-      { model: "minimax-h3/reference-to-video", whenPresent: ["referenceVideo"] },
-      { model: "minimax-h3/text-to-video" },
-    ],
+    capability: { module: MINIMAX, name: "minimax-h3" }, result: "video", routes: [{ model: "minimax-h3" }],
     fields: {
       prompt: { as: "value", field: "prompt" }, duration: { as: "value", field: "seconds" },
       resolution: { as: "value", field: "resolution", whenAbsent: "2k" }, aspectRatio: { as: "value", field: "aspect_ratio" },
@@ -98,10 +131,7 @@ export const hypiHubMappings: readonly GenerationWireMapping[] = [
     },
   },
   {
-    capability: { module: GROK, name: "grok-imagine-video" }, result: "video", routes: [
-      { model: "grok-imagine/image-to-video", whenPresent: ["images"] },
-      { model: "grok-imagine/text-to-video" },
-    ],
+    capability: { module: GROK, name: "grok-imagine-video" }, result: "video", routes: [{ model: "grok-imagine-video" }],
     fields: {
       prompt: { as: "value", field: "prompt" }, duration: { as: "value", field: "seconds" },
       resolution: { as: "value", field: "resolution" }, aspectRatio: { as: "value", field: "aspect_ratio" },

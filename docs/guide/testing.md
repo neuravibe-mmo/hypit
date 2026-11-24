@@ -52,15 +52,15 @@ exports, Records or plan steps. Never calls an external service.
 ```typescript
 test("compiles the expected exports", async () => {
   const compiler = createCompiler({ root, packageContributions });
-  const workspace = await compiler.openFile("fixture.svml");
-  const result = await compiler.compileSource(workspace.entry, workspace);
+  const workspace = await compiler.openEntry("fixture.svml");
+  const result = await compiler.compileResolvedSource(workspace.entry, workspace);
   assert.equal(result.exports.length, 3);
 });
 ```
 
 ### Provider tests
 
-Exercise request mapping, media transport and task progression against a controlled service fixture.
+Exercise request mapping, media transport and task progression, including failures, against a controlled service fixture.
 The [project Provider example](https://github.com/hypit-ai/hypit/tree/main/examples/provider-package)
 includes a lifecycle test that collects a returned image without spending on generation. Live calls
 use the selected service and explicit spending scope; an available key alone does not authorize them.
@@ -73,19 +73,19 @@ source-text regex tests as a substitute for dependency analysis or architectural
 
 Do not commit customer or brand fixtures, credential traces, paid output artifacts, absolute
 workstation paths or one-off delivery harnesses. Generic live tests may remain only when they are
-explicitly opt-in, use no committed secret and fail before spending money unless their gate is set.
+explicitly opt-in, use no committed secret and incur no cost when not enabled.
 
 ## Environment-gated tests
 
 | Command | What it tests | Prerequisites |
 |---|---|---|
 | `pnpm test:whisperx-service` | Python WhisperX service | Python 3.13, uv, frozen sync |
-| `pnpm test:image-opencv` | the shared OpenCV Raster interpreter across both request variants | the service's own interpreter at `services/image-opencv/.venv`; set `HYPIT_OPENCV_PYTHON` to use another |
+| `pnpm test:image-opencv` | the OpenCV Provider across Transform and Compose | the Provider's interpreter at `packages/provider-image-opencv-local/runtime/.venv`; set `HYPIT_OPENCV_PYTHON` to use another |
 
-For the local HyperFrames browser render tests, set `HYPIT_BROWSER_TESTS=1` in your shell environment, then run the command below from the repository root. Chrome, ffmpeg and ffprobe must be available.
+For the local HTML rasterization tests, set `HYPIT_BROWSER_TESTS=1` in your shell environment, then run the command below from the repository root. Chrome, ffmpeg and ffprobe must be available.
 
 ```sh
-node --import tsx --test packages/provider-hyperframes-local/test/provider.test.ts
+node --import tsx --test packages/provider-html-local/test/provider.test.ts
 ```
 
 ## Test fixtures

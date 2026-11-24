@@ -19,9 +19,9 @@ Core plans and advances dependencies without knowing that they make a video. A n
 
 ## Select the project and Profile
 
-Run commands from the video project, or select it explicitly with `--workspace`. Otherwise the
-nearest `package.json` above the current directory establishes the project; when none exists, the
-current directory is the project. Source filenames and Runtime configuration do not choose this boundary.
+Run commands from a project whose `package.json` declares `"hypit": { "project": true }`, or select
+it explicitly with `--project`. Otherwise the CLI searches upward for that marker. An Author Package,
+arbitrary directory, Source filename or Runtime configuration does not choose this boundary.
 
 ```bash
 hypit paths
@@ -48,7 +48,7 @@ A small local-processing Profile looks like this:
   "dataRoot": ".hypit/runtimes/local",
   "credentials": {},
   "endpoints": {
-    "media.local": { "use": "@hypit/provider-media-local" }
+    "media.local": { "use": "@hypit/media-local" }
   },
   "bindings": {}
 }
@@ -73,12 +73,22 @@ request does not silently select another account. Read the chosen Provider's REA
 
 ## Prepare only the services needed now
 
+For local media processing, prepare the selected tools and start the Worker:
+
 ```bash
-hypit auth status
-hypit doctor --endpoint media.local
 hypit runtime up --endpoint media.local
 hypit runtime status
 ```
+
+To prepare resources without starting a helper or Worker, use
+`hypit programs prepare --endpoint media.local`. Inspect their readiness with
+`hypit programs status --endpoint media.local`; use `hypit doctor --endpoint media.local` when
+checking a configuration or diagnosing a failure. These are available tools, not a required sequence.
+
+Local media processing declares no credentials. For a chosen service that declares credential slots,
+inspect those separately with `hypit auth status <endpoint>`. For example, after choosing HypiHub,
+use `hypit auth status hypihub.default` and connect the account with `hypit auth login hypihub.default`
+when needed.
 
 Use the actual Endpoint names from the Profile; repeat `--endpoint` for several. Omission covers the
 whole Profile. `doctor` reads configuration and performs the selected Providers' diagnostics without
@@ -86,7 +96,7 @@ submitting generation. Read warnings as well as errors: a stored credential or r
 is not proof that every request will succeed. With no Runtime selected, doctor checks project Results only.
 
 `runtime up` prepares the selected local dependencies and Managed Programs, then starts the Worker.
-It does not log into or start hosted services. `programs up|status|down` manages those local helpers
+It does not log into or start hosted services. `programs prepare|up|status|down` manages those local resources and helpers
 separately. Initial inference setup can require substantial downloads; compare that effort with hosted
 execution and choose the route before starting preparation.
 
@@ -135,21 +145,10 @@ of files a component reads later.
 
 ## Keep products with the project
 
-Without extra configuration, Results live in `.hypit/results`. A project can select another location
-or repository through `hypit.results.json`, independently of its Runtime Profile:
-
-```json
-{
-  "format": "hypit.build-results@1",
-  "use": "@hypit/build-result-fs",
-  "config": { "path": ".hypit/results" }
-}
-```
-
-The S3 adapter can instead store Results in a bucket and project prefix. The selected adapter owns
-access and credentials; changing Result storage does not move the active Runtime or upload external
-file references automatically. A submitted Build retains its chosen destination, and changing that
-selection does not migrate history.
+Results live with the project in `.hypit/results` on the machine running Hypit. A local workstation,
+an SSH Linux host and the official WebUI backend use the same rule: the whole Runtime moves to that
+host instead of splitting its queue, working files and Result storage across services. Archive or
+migrate completed Results explicitly after a Build when needed.
 
 Results publish completed public Outputs as they become available and retain the terminal outcome.
 A new Output can reference an existing file, including within a composite; it does not necessarily
@@ -158,5 +157,5 @@ future reuse. `get` creates a separate export when a person or another tool need
 
 `builds`, `history`, `inspect` and `get` read project Results without requiring the original Runtime.
 For exact storage and execution interfaces, see the
-[Result package](https://github.com/hypit-ai/hypit/blob/main/packages/build-result/README.md) and
+[Result package](https://github.com/hypit-ai/hypit/blob/main/packages/result/README.md) and
 [local Runtime package](https://github.com/hypit-ai/hypit/blob/main/packages/runtime-local/README.md).

@@ -1,14 +1,14 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { resolveNodePackageResource } from "@hypit/package-loader-node";
 import type {
   ManagedProgram,
   ManagedProgramCommand,
   ManagedProgramState,
-} from "@hypit/runtime-kit";
-import { pythonEnvironmentCommand } from "@hypit/runtime-host-node";
+} from "@hypit/runtime-local/extension";
+import { pythonEnvironmentCommand } from "@hypit/runtime-local/node";
 
 /**
  * WhisperX loads multi-gigabyte weights before it can answer, so it is a warm
@@ -20,10 +20,7 @@ import { pythonEnvironmentCommand } from "@hypit/runtime-host-node";
  * program home, while this read-only project remains replaceable Distribution
  * input. A custom service command transfers process ownership to that deployment.
  */
-export const localWhisperXManagedProject = join(
-  resolveNodePackageResource("@hypit/whisperx-service-runtime", "pyproject.toml", { from: import.meta.url }),
-  "..",
-);
+export const localWhisperXManagedProject = fileURLToPath(new URL("../runtime", import.meta.url));
 
 function run(command: ManagedProgramCommand): Promise<{ readonly ok: boolean; readonly output: string }> {
   return new Promise((resolve) => {
@@ -52,6 +49,8 @@ export type LocalWhisperXProgramOptions = {
   readonly expectedServiceVersion: string;
   readonly expectedWhisperXVersion: string;
   readonly serviceCommand?: ManagedProgramCommand;
+  readonly alignmentLanguages?: readonly string[];
+  readonly modelCacheDirectory?: string;
 };
 
 export function localWhisperXProgram(options: LocalWhisperXProgramOptions): ManagedProgram {
@@ -85,11 +84,13 @@ export function localWhisperXProgram(options: LocalWhisperXProgramOptions): Mana
     HYPIT_WHISPERX_COMPUTE: expected.compute,
     HYPIT_WHISPERX_BATCH_SIZE: String(expected.batchSize),
     HYPIT_WHISPERX_NLTK_DATA: nltkData,
+    ...(options.modelCacheDirectory === undefined ? {} : { HYPIT_WHISPERX_MODEL_CACHE: options.modelCacheDirectory }),
+    HYPIT_WHISPERX_ALIGNMENT_LANGUAGES: (options.alignmentLanguages ?? []).join(" "),
   };
   const check: ManagedProgramCommand = {
     command: pythonEnvironmentCommand(environment, "hypit-whisperx-check"),
-    args: [],
-    env: { HYPIT_WHISPERX_NLTK_DATA: nltkData },
+    args: ["--models"],
+    env: serviceEnvironment,
   };
   const managedStart: ManagedProgramCommand = {
     command: pythonEnvironmentCommand(environment, "hypit-whisperx-service"),
@@ -126,13 +127,15 @@ export function localWhisperXProgram(options: LocalWhisperXProgramOptions): Mana
         probe: installationProbe,
         prepareBeforeStart: true,
         commands: [{
+          label: "Prepare the locked Python environment",
           command: "uv",
           args: ["sync", "--project", localWhisperXManagedProject, "--frozen", "--no-editable"],
           env: { UV_PROJECT_ENVIRONMENT: environment },
         }, {
+          label: `Prepare WhisperX ${expected.model} and alignment resources for ${(options.alignmentLanguages ?? []).join(", ") || "no selected languages"}`,
           command: pythonEnvironmentCommand(environment, "hypit-whisperx-prepare"),
           args: ["--nltk-data", nltkData],
-          env: { HYPIT_WHISPERX_NLTK_DATA: nltkData },
+          env: serviceEnvironment,
         }],
       },
     } : {}),

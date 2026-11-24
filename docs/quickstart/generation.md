@@ -10,7 +10,7 @@ Every component shown here must be imported by its package specifier before use:
 
 ```svml
 <import as="media" from="@hypit/media@1"/>
-<import as="mediaop" from="@hypit/media-pipeline@1"/>
+<import as="mediaop" from="@hypit/media-operations@1"/>
 <import as="text" from="@hypit/text@1"/>
 <import as="seedance" from="@hypit/seedance@1"/>
 <import as="speaker-kit" source="@hypit/seedance-kits/speaker"/>
@@ -50,21 +50,21 @@ Typically used as a voice-timbre reference for `seedance:ReferenceVideo`.
 ## Durations are literals
 
 A generated take's length is the author's decision, written as a literal on the element that needs
-it. Measure the line first, then write the number:
+it. Estimate the line first, then write the number:
 
 ```bash
-hypit measure main.svml --segment hook --language en --pace normal --rounding round
+hypit estimate main.svml --segment hook --language en --pace normal --rounding round
 # 7s
 ```
 
 ```svml
-<seedance:ReferenceVideo id="hook-take" model="mini" prompt={hook-prompt} duration="7">
+<seedance:ReferenceVideo id="hook-take" model="mini" prompt={hook-prompt} duration="7" generate-audio="true">
   …
 </seedance:ReferenceVideo>
 ```
 
-`hypit measure` counts pronunciation units of the Segment's speech at a delivery policy — `language`,
-`pace` (`slow = 4.2`, `normal = 4.6`, `fast = 5.0` syllables per second for English) or a numeric
+`hypit estimate` counts pronunciation units of the Segment's speech at a delivery policy — `language`,
+`pace` (`slow = 4.2`, `normal = 4.6`, `fast = 5.6` syllables per second for English) or a numeric
 `rate` and `rounding` — with no external call. Nothing in the graph computes a duration,
 so the requested durations are available before a Build starts. Use the estimate to shape the
 wording and choose a supported request duration; the produced performance supplies actual word timing.
@@ -103,7 +103,7 @@ model-selected duration or an integer from 4 through 30 seconds:
 
 ```svml
 <seedance:ReferenceVideo id="long-take" model="2.5"
-  prompt={long-direction} duration="30" resolution="720p">
+  prompt={long-direction} duration="30" resolution="720p" generate-audio="true">
   <seedance:Reference image={presenter-reference} person-reference="true"/>
   <seedance:Reference audio={presenter-voice}/>
 </seedance:ReferenceVideo>
@@ -130,7 +130,8 @@ First-frame generation with an optional last frame:
 ```svml
 <seedance:FrameVideo id="transition" model="fast"
   prompt={transition-direction} duration="5"
-  first-frame={opening-image} last-frame={closing-image}/>
+  first-frame={opening-image} first-frame-person-reference="false"
+  last-frame={closing-image} last-frame-person-reference="false"/>
 ```
 
 ### seedance:ReferenceVideo
@@ -148,11 +149,12 @@ video and audio references within the model's declared limits.
 </seedance:ReferenceVideo>
 ```
 
-On an image or video reference, `person-reference="true"` declares a person/avatar in the supplied
-material, including a generated human likeness. Use false for a reference without that content;
-omission leaves the classification unspecified. Audio references do not use this visual flag.
-Frame mode provides `first-frame-person-reference` and `last-frame-person-reference`. The selected
-Provider carries this fact through the service's media preparation.
+Every image/video reference requires `person-reference="true|false"`: true if the supplied material
+contains a person, false otherwise. Omission is an error;
+audio must omit the field. Frame mode requires `first-frame-person-reference` and, when a last frame
+is supplied, `last-frame-person-reference`. The selected
+Provider carries this fact through the service's media preparation; a service without such a field
+accepts the declaration without transmitting it.
 
 A video reference can guide dance, physical action or camera movement while images guide the new
 appearance. Choose an excerpt that carries the intended motion within the selected model and
@@ -161,8 +163,8 @@ service's input-duration limits; the requested output duration is a separate cho
 The component does not know that this is a talking head. That meaning lives in the supplied Text.
 
 Common attributes are `id`, `model`, `prompt`, `duration`, `resolution`, `aspect-ratio` and
-`generate-audio`. `duration` is a literal in whole seconds inside the model's range, measured
-beforehand with `hypit measure`.
+`generate-audio`. `duration` is a literal in whole seconds inside the model's range, estimated
+beforehand with `hypit estimate`.
 
 The audio generated in an earlier take can be reused as a later reference through an ordinary graph
 edge. Extraction does not turn it into speech evidence or attach speaker meaning:
@@ -220,8 +222,8 @@ language for the selected model, keeping dialogue in the language it should be s
   resolution="720p"
   aspect-ratio="9:16"
   generate-audio="false">
-  <seedance:Reference image={scene}/>
-  <seedance:Reference image={product}/>
+  <seedance:Reference image={scene} person-reference="false"/>
+  <seedance:Reference image={product} person-reference="false"/>
 </seedance:ReferenceVideo>
 ```
 
@@ -319,7 +321,7 @@ reference media or generation endpoint.
 
 ## Combination example
 
-A two-take setup with measured durations written as literals, explicit Text assembly and Seedance
+A two-take setup with estimated durations written as literals, explicit Text assembly and Seedance
 generation:
 
 ```svml

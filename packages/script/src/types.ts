@@ -1,7 +1,9 @@
-import type { CanonicalValue, SourceRange, StoredValue, TypeRef } from "@hypit/protocol";
-import type { CaptionWordAttribute, Narrative, NarrativeMoment, NarrativeSegment, NarrativeSelection, NarrativeToken, NarrativeTurn } from "@hypit/narrative";
+import type { CanonicalValue, SourceRange, StoredValue, TypeRef } from "@hypit/hypit/protocol";
+import type { CaptionWordAttribute } from "@hypit/caption";
+import type { Narrative, NarrativeMoment, NarrativeSegment, NarrativeSelection, NarrativeToken, NarrativeTurn } from "@hypit/narrative";
 
-export type { CaptionWordAttribute, Narrative, SemanticAnchor } from "@hypit/narrative";
+export type { CaptionWordAttribute } from "@hypit/caption";
+export type { Narrative, SemanticAnchor } from "@hypit/narrative";
 
 export type Affinity = "left" | "right";
 
@@ -35,7 +37,7 @@ export type ParsedSegment = NarrativeSegment & {
   readonly index: number;
   readonly atoms: readonly ParsedAtom[];
   readonly range: SourceRange;
-  /** Exact body range between the Segment tags, used only for source-preserving marker edits. */
+  /** Exact body range between Segment tags for Script-owned source edits and formatting. */
   readonly contentRange: SourceRange;
   readonly selfClosing: boolean;
 };
@@ -61,13 +63,14 @@ export type ParsedMoment = Omit<NarrativeMoment, "narrativeId"> & {
 };
 
 export type ParsedCaptionRegion = {
+  readonly separatorBefore: "" | " ";
   readonly id: string;
   readonly display: string;
   readonly segmentId: string;
   readonly startToken: number;
   readonly endTokenExclusive: number;
   readonly kind: "identity" | "alias" | "hidden";
-  /** Flat word attributes authored on the display side; indices address displayWordSurfaces(display). */
+  /** Flat word attributes authored on the display side; indices address displaySurfaces(display). */
   readonly marks: readonly {
     readonly displayIndex: number;
     readonly attributes: readonly CaptionWordAttribute[];
@@ -77,12 +80,10 @@ export type ParsedCaptionRegion = {
 
 export type ParsedNarrative = Omit<
   Narrative,
-  "id" | "segments" | "tokens" | "turns" | "selections" | "moments" | "caption"
+  "id" | "segments" | "tokens" | "turns" | "selections" | "moments"
 > & {
-  /** Exact Script body range, used only for source-preserving Program-boundary edits. */
+  /** Exact Script body range, used for source-preserving edits and comparisons. */
   readonly sourceRange: SourceRange;
-  /** Ordinary source prose/whitespace; excludes tags, Dual Text, attributes and comments. */
-  readonly proseRanges: readonly SourceRange[];
   readonly segments: readonly ParsedSegment[];
   readonly tokens: readonly ParsedToken[];
   readonly turns: readonly ParsedTurn[];

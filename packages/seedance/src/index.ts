@@ -1,17 +1,15 @@
-import {
-  sealGenerationPortRequest,
-  sealGenerationPortTable,
-} from "@hypit/generation";
+import { sealGenerationPortTable } from "@hypit/generation";
 import type {
   GenerationPortTable,
   GenerationPortValue,
   GenerationRequest,
 } from "@hypit/generation";
-import { artifactTypes } from "@hypit/artifact";
-import type { SurfaceAttributeVocabulary, SurfacePortVocabulary } from "@hypit/markup";
-import { defineExactModelModule } from "@hypit/model-kit";
-import { textTypes } from "@hypit/text";
-import type { ResourceId } from "@hypit/protocol";
+import { blobTypes } from "@hypit/hypit/blob";
+import type { ResourceId } from "@hypit/hypit/protocol";
+import type { SurfaceAttributeVocabulary, SurfacePortVocabulary } from "@hypit/hypit/markup";
+import { defineExactModelModule } from "@hypit/generation/model";
+import { textTypes } from "@hypit/hypit/text";
+import { validateSeedanceInputs } from "./validation.js";
 
 export const seedanceModuleRef = { name: "@hypit/seedance", version: "1" } as const;
 export const seedanceModels = ["seedance-2", "seedance-2-fast", "seedance-2-mini", "seedance-2.5"] as const;
@@ -19,7 +17,7 @@ export type SeedanceModel = typeof seedanceModels[number];
 
 const ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "adaptive"] as const;
 
-const PERSON_REFERENCE_FIELDS = [{ name: "personReference", value: { kind: "boolean" }, optional: true }] as const;
+const PERSON_REFERENCE_FIELDS = [{ name: "personReference", value: { kind: "boolean" } }] as const;
 
 const SEEDANCE_25_DURATIONS = [-1, ...Array.from({ length: 27 }, (_item, index) => index + 4)] as const;
 
@@ -93,7 +91,7 @@ export const seedancePorts: Readonly<Record<SeedanceModel, GenerationPortTable>>
 export type SeedancePortMap = Readonly<Record<string, readonly GenerationPortValue[]>>;
 
 export function sealSeedanceRequest(model: SeedanceModel, ports: SeedancePortMap): GenerationRequest {
-  return sealGenerationPortRequest(seedancePorts[model], ports);
+  return seedanceEndpointsByModel[model].sealRequest(ports);
 }
 
 const seedanceBaseDefinition = defineExactModelModule({
@@ -110,6 +108,7 @@ const seedanceBaseDefinition = defineExactModelModule({
       : `${model.split("-").map((part) => part[0]!.toUpperCase() + part.slice(1)).join("")}Request`,
     producerName: `request-${model}`,
     ports: seedancePorts[model],
+    validateInputs: validateSeedanceInputs,
   })),
 });
 
@@ -151,7 +150,7 @@ const seedanceCommonAttributes: readonly SurfaceAttributeVocabulary[] = [
     name: "duration",
     kind: "literal",
     required: true,
-    summary: "Sets the length of the video in whole seconds within the model's range; the author's decision, measured beforehand with hypit measure.",
+    summary: "Sets the length of the video in whole seconds within the model's range; the author's decision, estimated beforehand with hypit estimate.",
   },
   {
     name: "resolution",
@@ -176,14 +175,14 @@ const seedanceCommonAttributes: readonly SurfaceAttributeVocabulary[] = [
   },
 ];
 
-const personReferenceAttribute = (name: string): SurfaceAttributeVocabulary => ({
-  name, kind: "literal", required: false, values: ["true", "false"],
-  summary: "Declares whether this visual input contains a person/avatar reference, including an AI-generated human likeness. Omission leaves it unclassified.",
+const personReferenceAttribute = (name: string, required = false): SurfaceAttributeVocabulary => ({
+  name, kind: "literal", required, values: ["true", "false"],
+  summary: "Required for each supplied image/video, including first/last frames: true if it contains a person, false otherwise. Audio must omit it.",
 });
 
 const seedanceVideoPort: readonly SurfacePortVocabulary[] = [{
   name: "video",
-  type: artifactTypes.blob,
+  type: blobTypes.blob,
   summary: "The first ordered member of the generated set, addressed as `<id>.video`.",
 }];
 
@@ -236,25 +235,25 @@ export const seedanceMarkupSurfaces = [
       summary: "Generates one video with an exact Seedance model from a Text prompt and the images the video opens and closes on.",
       attributes: [
         ...seedanceCommonAttributes,
-        personReferenceAttribute("first-frame-person-reference"),
+        personReferenceAttribute("first-frame-person-reference", true),
         personReferenceAttribute("last-frame-person-reference"),
         {
           name: "first-frame",
           kind: "reference",
           required: true,
           summary: "The image Artifact the generated video opens on.",
-          accepts: [artifactTypes.blob],
+          accepts: [blobTypes.blob],
         },
         {
           name: "last-frame",
           kind: "reference",
           required: false,
           summary: "The image Artifact the generated video closes on.",
-          accepts: [artifactTypes.blob],
+          accepts: [blobTypes.blob],
         },
       ],
       ports: seedanceVideoPort,
-      example: '<seedance:FrameVideo id="bridge" model="fast" prompt={direction} duration="5" first-frame={first.image} last-frame={last.image}/>',
+      example: '<seedance:FrameVideo id="bridge" model="fast" prompt={direction} duration="5" first-frame={first.image} first-frame-person-reference="true" last-frame={last.image} last-frame-person-reference="false"/>',
       notes: [
         ...seedanceSettingNotes,
         "Both frames are ordinary image Artifact edges; the Surface copies no runtime media into request metadata.",
@@ -283,21 +282,21 @@ export const seedanceMarkupSurfaces = [
             kind: "reference",
             required: false,
             summary: "The image Artifact this reference contributes to the generation.",
-            accepts: [artifactTypes.blob],
+            accepts: [blobTypes.blob],
           },
           {
             name: "video",
             kind: "reference",
             required: false,
             summary: "The video Artifact this reference contributes to the generation.",
-            accepts: [artifactTypes.blob],
+            accepts: [blobTypes.blob],
           },
           {
             name: "audio",
             kind: "reference",
             required: false,
             summary: "The audio Artifact this reference contributes to the generation.",
-            accepts: [artifactTypes.blob],
+            accepts: [blobTypes.blob],
           },
         ],
       }],
@@ -317,7 +316,7 @@ export const seedanceMarkupSurfaces = [
       notes: [
         ...seedanceSettingNotes,
         "The element requires at least one `Reference` child, and the model's port limits cap how many of each role it accepts.",
-        "`person-reference` applies to image/video references; voice audio carries no visual classification. The Provider transports the declared fact according to its API.",
+        "Every image/video Reference requires `person-reference=\"true|false\"`. Classify the supplied material; audio must omit the field. The Provider transports it according to its API.",
         "A `Reference` carries exactly one of `image`, `video` or `audio`, and is empty.",
       ],
     },
@@ -326,6 +325,7 @@ export const seedanceMarkupSurfaces = [
 
 /** The duration is an author literal on every Seedance Surface, so the manifest is the exact-model module's own. */
 export const seedanceManifest = seedanceBaseDefinition.manifest;
+
 export const seedanceComponent = seedanceBaseDefinition.component;
 export const seedanceDefinition = seedanceBaseDefinition;
 

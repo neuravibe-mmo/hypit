@@ -1,11 +1,13 @@
+import { resolve } from "node:path";
+
 import { readExecutionLog } from "@hypit/runtime";
-import type { BuildResultManifest, BuildResultRepository } from "@hypit/build-result";
-import type { NodeRuntimeHost } from "@hypit/runtime-host-node";
+import type { BuildResultManifest, BuildResultRepository } from "@hypit/result";
 
 import type { CliCommand, ExecutionCommand } from "../command.js";
+import { commandHint } from "../command-hint.js";
 import { activityObservationKey, buildProgressLines, buildProgressView, observeBuildView } from "../observation.js";
 import type { CliIo } from "../output.js";
-import type { CliRuntimeController } from "../runtime-port.js";
+import type { CliRuntimeHost } from "../runtime-port.js";
 import { formatOperationProgress } from "../runtime-view.js";
 import { buildStatusView } from "../view.js";
 import type { CliBuildStatusView } from "../view.js";
@@ -37,15 +39,19 @@ export function isExecutionCommand(args: CliCommand): args is ExecutionCommand {
 /** Inspect or control accepted Build work. Observation never owns execution. */
 export async function runExecutionCommand(input: {
   readonly args: ExecutionCommand;
+  readonly projectRoot: string;
   readonly runtimeProfile: string | undefined;
   readonly resolveProjectRuntime?: () => Promise<string | undefined>;
   readonly io: CliIo;
-  readonly runtimeHost: (profile: string) => Promise<NodeRuntimeHost>;
-  readonly runtimeController: (profile: string) => Promise<CliRuntimeController>;
+  readonly runtimeHost: (profile: string) => Promise<CliRuntimeHost>;
   readonly openProjectResults: OpenProjectResults;
   readonly write: OperationalWriter;
 }): Promise<void> {
-  const { args, runtimeProfile, io, runtimeHost, runtimeController, openProjectResults, write } = input;
+  const { args, runtimeProfile, io, runtimeHost, openProjectResults, write } = input;
+  const commandScope = {
+    projectRoot: input.projectRoot,
+    ...(runtimeProfile === undefined ? {} : { runtimeProfile: resolve(runtimeProfile) }),
+  };
   if (args.command === "logs") {
     const opened = await openProjectResults();
     let source: "runtime" | "result" | "unavailable" = "unavailable";
@@ -156,15 +162,14 @@ export async function runExecutionCommand(input: {
   const runtime = await selectedHost.openControl({ readOnly: args.command !== "cancel" });
   try {
     if (args.command === "activity") {
-      const controller = await runtimeController(runtimeProfile);
       let previous: string | undefined;
       const writeActivity = async (): Promise<void> => {
-        const [activity, worker] = await Promise.all([
+        const [activity, execution] = await Promise.all([
           runtime.activity(),
-          controller.worker.status(),
+          selectedHost.executionStatus(),
         ]);
         const builds = activity.builds.slice(0, args.limit).map((item) => {
-          const status = buildStatusView({ id: item.id, runtime: item });
+          const status = buildStatusView({ id: item.id, runtime: item, commandScope });
           return {
             id: item.id,
             work: status.work,
@@ -173,13 +178,13 @@ export async function runExecutionCommand(input: {
           };
         });
         const currentView = JSON.stringify([activity.builds.length,
-          activityObservationKey(worker.state, activity.builds.slice(0, args.limit))]);
+          activityObservationKey(execution.state, activity.builds.slice(0, args.limit))]);
         if (args.watch && currentView === previous) return;
         previous = currentView;
         const value = {
           format: "hypit.cli-activity@1" as const,
           at: Date.now(),
-          worker: worker.state,
+          execution: execution.state,
           builds,
           ...(activity.builds.length <= args.limit ? {} : { omittedBuilds: activity.builds.length - args.limit }),
           ...(args.presentation.verbose ? { capacity: activity.capacity } : {}),
@@ -200,7 +205,7 @@ export async function runExecutionCommand(input: {
           : [];
         write(value, "Runtime activity", activity.builds.length === 0 ? "success" : "info", [
           ["Active Builds", String(activity.builds.length)],
-          ["Worker", worker.state],
+          ["Execution", execution.state],
         ], [
           ...buildLines,
           ...(operationLines.length === 0 ? [] : ["Operations:", ...operationLines]),
@@ -219,23 +224,22 @@ export async function runExecutionCommand(input: {
       let result: BuildResultManifest | undefined;
       let resultReadError: string | undefined;
       let openedResults: Awaited<ReturnType<OpenProjectResults>> | undefined;
+      if (args.watch && view !== undefined && view.issue === undefined) {
+        view = await observeBuildView(runtime, args.build, view, {
+          ...(args.maxWaitMs === undefined ? {} : { maxWaitMs: args.maxWaitMs }),
+          executionStatus: async () => await selectedHost.executionStatus(),
+          commandScope,
+          onProgress: (progress) => {
+            const report = io.writeProgress ?? (args.presentation.json ? undefined : io.write);
+            for (const line of buildProgressLines(progress, {
+              verbose: args.presentation.verbose,
+              limit: args.limit,
+            })) report?.(`${line}\n`);
+          },
+        });
+      }
       try {
         openedResults = await openProjectResults();
-        if (args.watch && view !== undefined && view.issue === undefined) {
-          const controller = await runtimeController(runtimeProfile);
-          view = await observeBuildView(runtime, args.build, view, {
-            ...(args.maxWaitMs === undefined ? {} : { maxWaitMs: args.maxWaitMs }),
-            controller,
-            ...(args.presentation.json ? {} : {
-              onProgress: (progress) => {
-                for (const line of buildProgressLines(progress, {
-                  verbose: args.presentation.verbose,
-                  limit: args.limit,
-                })) io.write(`${line}\n`);
-              },
-            }),
-          });
-        }
         result = await openedResults.repository.read(args.build);
       } catch (error) {
         resultReadError = error instanceof Error ? error.message : String(error);
@@ -250,6 +254,7 @@ export async function runExecutionCommand(input: {
       const issue = view?.issue;
       const build = !found ? null : buildStatusView({
         id: view?.id ?? result!.id,
+        commandScope,
         ...(view === undefined ? {} : { runtime: view }),
         ...(result === undefined ? {} : { result }),
         ...(resultReadError === undefined ? {} : { resultReadError }),
@@ -309,8 +314,8 @@ export async function runExecutionCommand(input: {
         throw new Error(`Build ${args.build} is still ${before.activity}; there is no Result write to finish`);
       }
       if (before !== undefined && before.issue === undefined) {
-        const worker = await (await selectedHost.controller()).worker.status();
-        if (worker.state === "running") {
+        const execution = await selectedHost.executionStatus();
+        if (execution.state === "running") {
           throw new Error(`Build ${args.build} Result is currently being written by the Runtime Worker`);
         }
       }
@@ -338,7 +343,7 @@ export async function runExecutionCommand(input: {
         outcome: finished.outcome,
         ...(finished.issue === undefined ? {} : { attention: {
           message: finished.issue.message,
-          action: `hypit result finish ${args.build}`,
+          action: commandHint(["result", "finish", args.build], commandScope),
         } }),
       }, finished.issue === undefined ? "Result finished" : "Result still needs attention",
       finished.issue === undefined ? "success" : "error", [
@@ -356,6 +361,7 @@ export async function runExecutionCommand(input: {
       : await openedResults.repository.read(args.build).finally(async () => await openedResults.close());
     const build = active === undefined && finished === undefined ? null : buildStatusView({
       id: args.build,
+      commandScope,
       ...(active === undefined ? {} : { runtime: active }),
       ...(finished === undefined ? {} : { result: finished }),
     });

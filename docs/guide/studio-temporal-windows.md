@@ -1,98 +1,62 @@
 ---
-title: Studio Temporal Lineage
-description: How author choice becomes an Instant or Window and returns to its real source.
+title: Timing edits in Studio
+description: Edit the declaration that produced an absolute Instant or Window.
 ---
 
-Time has three layers:
+Components use absolute Instants and Windows. Studio follows the graph to the value's producer and
+edits that declaration; it does not ask every visual, audio, caption or text component to understand
+the source domain.
 
-```text
-author choice (Selection / Segment / Moment / program time)
-  -> projection (TemporalInstant / TemporalWindow)
-  -> domain consumption (Program / Schedule / Track)
+## Absolute declarations
+
+| Author form | Moving it changes | Trimming it changes |
+| --- | --- | --- |
+| `from="2s" for="8f"` | `from`; duration remains eight frames | leading: `from` + `for`; trailing: `for` |
+| `until="3s" for="8f"` | `until`; duration remains eight frames | leading: `for`; trailing: `until` + `for` |
+| `from="1s" until="3s"` | both endpoints by the same delta | the selected endpoint |
+| named Window declared with `from`/`until`/`for` | the named declaration | the selected relation |
+| component `during={named-window}` | the named value's producer | the named value's producer |
+
+An Instant reference behaves the same way: component `at={claim}` follows the declaration that
+produced `claim`. Clock literals belong on named Timeline or standalone declarations, not on the
+component surface.
+
+## Domain-produced values
+
+Narrative time is projected before it reaches the component:
+
+```svml
+<semantic:Projection id="story-time" narrative={story} timeline={film.timeline}>
+  <semantic:Map alignment={speech.alignment} domain={speech-media.domain} window={film.speech}/>
+</semantic:Projection>
+<semantic:Window id="proof" projection={story-time} during={story.selection.proof}/>
+<semantic:Instant id="reveal" projection={story-time} at={story.moment.reveal}/>
+
+<visual:Clip during={proof} .../>
+<deck:Card at={reveal} .../>
 ```
 
-Script's semantic ruler contains `2M + 2N + 2` author points: Token and Segment boundaries plus
-distinct Program start/end anchors. Program anchors resolve at frame `0` and `frameCount` in the
-Timeline; they are author points and therefore never have to be forged inside a SemanticTake.
-Their Script order need not match physical time when Takes overlap or are reordered.
-This does not make `during="program"` writable: that projection remains structurally fixed.
+The Narrative projection declaration retains the Selection or Moment relation required by its
+Companion. Editing that declaration may move Script anchors, and every consumer follows after recompilation.
+The consumers themselves receive only completed absolute values. A future beat projector can offer
+different editing rules while publishing the same Temporal types.
 
-`@hypit/temporal-markup` owns the SVML author forms and lowers them before a domain component runs.
-The compiler only composes records, components and fragments; it does not recognize `during`, `at`
-or any time grammar. One Timeline supplies the complete range and any placed semantic evidence.
-Domain components receive that same Timeline and projected time values, remaining independent from
-both semantic lookup and Studio.
+If a producer declares no inverse, the resolved value remains usable but Studio does not guess a
+write target. This keeps shared meaning, local clock values and component behavior separate.
 
-## Runtime values
+Each drag is solved as one complete constraint. A leading trim keeps the old end, a trailing trim
+keeps the old start, and a move keeps the old duration. Studio follows the executed Temporal graph
+to the exact author endpoints and commits every required source change together.
 
-A `TemporalInstant` contains the runtime source used to evaluate it, the exact point expression and
-resolved frame, and one author authority: `semantic`, `parameter` or `fixed`.
+Named values constructed inside `<time:Timeline>` follow the same rule. Timeline Author retains the
+child declaration that owns each literal offset or duration, so Studio can edit that exact
+`Instant.at`, `Window.from`, `Window.until` or `Window.for` value. Bare references continue upstream;
+an `earliest(...)` or `latest(...)` expression stays read-only when changing it would require choosing
+one branch on the author's behalf.
 
-The identity chain is author-visible rather than synthesized by Studio:
+Unedited expressions retain their units: `2s` remains two seconds when frame rate changes, whereas
+`60f` remains sixty frames. A changed clock value is written on a whole frame boundary for the
+current Timeline.
 
-- `<script id="story">` becomes `Narrative.id = story`; every Selection, Moment, Segment excerpt
-  and CaptionDocument from that Script carries `narrativeId = story`;
-- every terminal Track's `programSpaceId` names the selected Timeline. `ProgramSpace` is the shared
-  clock/range shape contained in Timeline, not a second author-declared time axis;
-- every projected Instant carries the space identity; semantic sources also carry the Narrative
-  identity. Each includes the consumer's public domain identity (normally its SVML `id`) as `subjectId`.
-
-The projection record `id` may be qualified to stay unique inside an expanded graph; it is not the
-author identity. `subjectId` is kept separate and remains the exact board, card, item or sequence
-identity published by the component's public Program.
-
-These values are ordinary runtime provenance, not random hashes or Studio metadata. They let a
-consumer and its inverse reject a same-named Selection from another Script or a Track projected on
-another timeline. A Script id therefore names one Narrative across the active Source closure.
-The Script Surface declares that identity, and compilation rejects duplicates before Studio needs
-to choose a source.
-
-A `TemporalWindow` contains two complete Instants and a non-empty half-open span. Its endpoints may
-have different sources and different authorities, so a Window never pretends to have one source.
-ProgramSpace boundaries are legal Instants; `program.end` is not disguised as a one-frame Window.
-Out-of-range Instants and reversed or empty Windows are rejected, not clipped or repaired.
-
-## Author forms
-
-| Form | Start authority | End authority | Timeline writeback |
-|---|---|---|---|
-| `during={Selection}` | semantic Selection start | semantic Selection end | Script markers |
-| `during={Segment}` / `during="program"` | fixed | fixed | read-only |
-| `at={Moment} for="…"` | semantic Moment cue | parameter `for` | Script and/or SVML atomically |
-| `until={Moment} for="…"` | parameter `for` | semantic Moment cue | Script and/or SVML atomically |
-| `at="2s" for="…"` | parameter `at` | parameter `for` | SVML timing attributes |
-| `start="…" end="…"` | parameter `start` | parameter `end` | SVML timing attributes |
-
-A point consumer uses `at={Moment}` (or a chosen Selection boundary) for semantic authority, or
-`at="2s"` for authored time. `instant="…"` accepts a projected expression. Text such as `at="moment.cue+3f"` is rejected because it hides
-whether the author intended to move the Moment or the offset.
-
-## Studio inverse
-
-Studio indexes the actual executed `TemporalInstant` and `TemporalWindow` records plus their direct
-consumer edges. Endpoint authority, not a component name or Companion declaration, determines the
-inverse:
-
-- semantic authority writes the shared Script identity;
-- parameter authority names the author input selected by the runtime record;
-- fixed authority disables a gesture that would change it.
-
-For `at/for` and `until/for`, one gesture may touch both layers. For example, trimming the start of
-an `at/for` Window moves the Moment and changes `for` so the end stays fixed. Studio applies both
-source ranges as one revisioned transaction, recompiles, and rolls both back on failure.
-
-Companion packages still decide how an entity looks and which Inspector fields are visible. They do
-not declare common timeline inverse functions. A new component becomes time-editable by consuming
-the same public Instant/Window protocol and carrying its executed lineage to its Studio entity.
-
-Film and Script interpretation also remain outside Studio core. `film-studio` declares which Film
-reference supplies the time axis and which child references are terminal Tracks; `script-studio` owns
-Script source observation and marker relocation. Studio selects the Script source map whose
-`narrativeId` exactly matches the active Timeline and delegates the edit back to that companion.
-A zero-Take Timeline supplies the same physical time range without requiring a Script lane.
-
-The binding name is not used as a global address. Markup retains the exact author element and input
-range while decoding, Elaborator hygienizes that endpoint with its Source unit, and the compiled
-`AuthorProvenance` joins the executed authority to one author endpoint. Studio therefore never
-chooses the first same-named `start`, output or local id across imported Sources. The provenance is
-recomputed with the compilation and is not persisted as metadata, a lock or an index file.
+[Studio](../quickstart/preview.md) explains the editing interface. The
+[Companion guide](./studio-companion-architecture.md) explains package-owned Items and controls.

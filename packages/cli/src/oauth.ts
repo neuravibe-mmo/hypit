@@ -28,7 +28,55 @@ function tokenExpiry(value: { readonly expires_at?: unknown; readonly expires_in
   return seconds === undefined ? undefined : Date.now() + seconds * 1_000;
 }
 
-/** Acquire one OAuth credential from the exact data declared by its Endpoint package. */
+export type AuthorizeBrowserLaunch = {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly windowsVerbatimArguments: boolean;
+  readonly env?: Readonly<Record<string, string>>;
+};
+
+/**
+ * Open the authorize URL in a browser. Windows `cmd /c start` treats `&` as a command
+ * separator unless the URL is a later quoted token after an explicit window title.
+ */
+export function authorizeBrowserLaunch(
+  url: string,
+  options: { readonly platform?: NodeJS.Platform; readonly comSpec?: string } = {},
+): AuthorizeBrowserLaunch {
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    // Expand one environment value after cmd parses the command. Interpolating the
+    // URL into command text would also expand percent sequences inside the URL.
+    const serialized = new URL(url).href;
+    return {
+      command: options.comSpec ?? process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", 'start "" "%HYPIT_OAUTH_AUTHORIZE_URL%"'],
+      windowsVerbatimArguments: true,
+      env: { HYPIT_OAUTH_AUTHORIZE_URL: serialized },
+    };
+  }
+  return {
+    command: platform === "darwin" ? "open" : "xdg-open",
+    args: [url],
+    windowsVerbatimArguments: false,
+  };
+}
+
+function openAuthorizeUrl(url: string): void {
+  const launch = authorizeBrowserLaunch(url);
+  const child = spawn(launch.command, [...launch.args], {
+    stdio: "ignore",
+    detached: true,
+    windowsHide: true,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+    ...(launch.env === undefined ? {} : { env: { ...process.env, ...launch.env } }),
+  });
+  // A missing opener must not crash the CLI; the URL is already on the progress line.
+  child.once("error", () => undefined);
+  child.unref();
+}
+
+/** Acquire one OAuth credential from the exact data declared by its Endpoint instance. */
 export async function acquireOAuthCredential(
   acquisition: CredentialAcquisition,
   options: OAuthAcquisitionOptions = {},
@@ -39,7 +87,9 @@ export async function acquireOAuthCredential(
   const verifier = base64url(randomBytes(32));
   // S256 is part of OAuth PKCE. It authenticates this browser exchange; it is not content identity.
   const challenge = base64url(createHash("sha256").update(verifier).digest());
-  const state = base64url(randomBytes(24));
+  const callbackOrigin = new URL(acquisition.redirectUri).origin;
+  const nonce = base64url(randomBytes(24));
+  let state = nonce;
   const server = createServer();
   const callback = new Promise<string>((resolveCode, reject) => {
     let settled = false;
@@ -48,6 +98,19 @@ export async function acquireOAuthCredential(
       server.unref();
     };
     server.on("request", (request, response) => {
+      // The hosted callback page fetches this loopback from a public page; Chrome's Private
+      // Network Access check preflights with OPTIONS and expects these headers back.
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, {
+          "access-control-allow-origin": callbackOrigin,
+          "access-control-allow-methods": "GET, OPTIONS",
+          "access-control-allow-private-network": "true",
+          "cache-control": "no-store",
+          connection: "close",
+        });
+        response.end();
+        return;
+      }
       if (settled) {
         response.writeHead(204, { "cache-control": "no-store", connection: "close" });
         response.end();
@@ -62,6 +125,7 @@ export async function acquireOAuthCredential(
         const code = url.searchParams.get("code");
         if (code === null || code.length === 0) throw new Error("OAuth callback contained no code");
         response.writeHead(200, {
+          "access-control-allow-origin": callbackOrigin,
           "cache-control": "no-store",
           connection: "close",
           "content-type": "text/html; charset=utf-8",
@@ -71,6 +135,7 @@ export async function acquireOAuthCredential(
         resolveCode(code);
       } catch (error) {
         response.writeHead(400, {
+          "access-control-allow-origin": callbackOrigin,
           "cache-control": "no-store",
           connection: "close",
           "content-type": "text/html; charset=utf-8",
@@ -92,7 +157,10 @@ export async function acquireOAuthCredential(
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("could not open a local OAuth callback");
-  const redirectUri = `http://127.0.0.1:${address.port}/callback`;
+  // The hosted callback page forwards the code to this port when the browser shares this host;
+  // otherwise the page shows `code#state` for the user to deliver to this port themselves.
+  state = `${nonce}.${address.port}`;
+  const redirectUri = acquisition.redirectUri;
   const authorize = new URL(acquisition.authorizationEndpoint);
   authorize.searchParams.set("response_type", "code");
   authorize.searchParams.set("client_id", acquisition.clientId);
@@ -102,13 +170,8 @@ export async function acquireOAuthCredential(
   authorize.searchParams.set("code_challenge", challenge);
   authorize.searchParams.set("code_challenge_method", "S256");
   options.onProgress?.(`Opening sign-in: ${authorize}`);
-  if (options.open === undefined) {
-    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-    const openerArgs = process.platform === "win32" ? ["/c", "start", "", authorize.toString()] : [authorize.toString()];
-    spawn(opener, openerArgs, { stdio: "ignore", detached: true, windowsHide: true }).unref();
-  } else {
-    options.open(authorize.toString());
-  }
+  if (options.open === undefined) openAuthorizeUrl(authorize.toString());
+  else options.open(authorize.toString());
   const code = await callback;
   options.onProgress?.("Authorization returned. Exchanging token…");
   const deadline = AbortSignal.timeout(acquisition.requestTimeoutMs);

@@ -1,10 +1,11 @@
-import { canonicalize } from "@hypit/protocol";
-import type { CanonicalValue } from "@hypit/protocol";
-import type { CaptionAlignmentUnit, CaptionDocument, CaptionDisplayWord } from "@hypit/narrative";
-import { sealText } from "@hypit/text";
+import { canonicalize } from "@hypit/hypit/protocol";
+import type { CanonicalValue } from "@hypit/hypit/protocol";
+import type { CaptionCue, CaptionDocument, CaptionDisplayWord, CaptionUnit } from "@hypit/caption";
+import type { NarrativeCaptionBinding } from "@hypit/narrative-caption";
+import { sealText } from "@hypit/hypit/text";
 
 import type { ParsedCaptionRegion, ParsedNarrative } from "./types.js";
-import { cleanProjection, displayWordSurfaces, joinProjection, lexicalCount } from "./lexical.js";
+import { cleanProjection, displaySurfaces, joinProjection, lexicalCount } from "./lexical.js";
 
 function turnForRegion(parsed: ParsedNarrative, region: ParsedCaptionRegion): ParsedNarrative["turns"][number] {
   const turn = parsed.turns.find((candidate) =>
@@ -15,13 +16,23 @@ function turnForRegion(parsed: ParsedNarrative, region: ParsedCaptionRegion): Pa
   return turn;
 }
 
-function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string): CaptionDocument {
-  const units: CaptionAlignmentUnit[] = [];
+type CaptionViews = { readonly document: CaptionDocument; readonly binding: NarrativeCaptionBinding };
+
+function projectCaption(
+  parsed: ParsedNarrative,
+  documentId: string,
+  narrativeId: string,
+  bindingId = `${documentId}.binding`,
+): CaptionViews {
+  const units: CaptionUnit[] = [];
+  const unitContexts: Array<{ readonly groupId: string; readonly role?: string }> = [];
+  const bindings: Array<{ unitId: string; sourceTokenIds: readonly string[] }> = [];
   const words: CaptionDisplayWord[] = [];
   for (const region of parsed.captionProjection.regions) {
     if (region.kind === "hidden") continue;
     const turn = turnForRegion(parsed, region);
-    const surfaces = displayWordSurfaces(region.display);
+    const display = displaySurfaces(region.display);
+    const surfaces = display.map(word => word.text);
     if (surfaces.length === 0) throw new Error(`Caption region ${region.id} contains no visible display surface`);
     // A Dual Text alias is one indivisible N:M correspondence unit. Ordinary prose gives one
     // unit per display surface so the author can place cue/style boundaries between words.
@@ -35,17 +46,15 @@ function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string
     }
     let sourceCursor = region.startToken;
     for (const group of groups) {
-      const unitId = `${id}:unit:${units.length + 1}`;
+      const unitId = `${documentId}:unit:${units.length + 1}`;
       const unitWordIds = group.surfaces.map((surface, groupIndex) => {
         const wordId = `${unitId}:word:${groupIndex + 1}`;
         const attributes = region.marks.find((mark) => mark.displayIndex === group.indices[groupIndex])?.attributes ?? [];
         words.push({
           id: wordId,
           unitId,
-          segmentId: region.segmentId,
-          turnId: turn.id,
-          ...(turn.role === undefined ? {} : { role: turn.role }),
           text: surface,
+          separatorBefore: group.indices[groupIndex] === 0 ? region.separatorBefore : display[group.indices[groupIndex]!]!.separatorBefore,
           attributes,
         });
         return wordId;
@@ -57,12 +66,11 @@ function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string
       if (sourceTokenIds.length === 0) throw new Error(`Caption Unit ${unitId} has no authored speech correspondence`);
       units.push({
         id: unitId,
-        segmentId: region.segmentId,
-        turnId: turn.id,
-        ...(turn.role === undefined ? {} : { role: turn.role }),
         wordIds: unitWordIds,
-        sourceTokenIds,
       });
+      unitContexts.push({ groupId: `${region.segmentId}:${turn.id}`,
+        ...(turn.role === undefined ? {} : { role: turn.role }) });
+      bindings.push({ unitId, sourceTokenIds });
       sourceCursor = sourceEnd;
     }
     if (sourceCursor !== region.endTokenExclusive) {
@@ -73,7 +81,8 @@ function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string
   const tokenIndex = new Map(parsed.tokens.map((token) => [token.id, token.index]));
   const cueBreaks = parsed.captionProjection.breaks.map((breakPoint) => {
     const next = units.findIndex((unit) => {
-      const indexes = unit.sourceTokenIds.map((tokenId) => tokenIndex.get(tokenId));
+      const binding = bindings.find((candidate) => candidate.unitId === unit.id)!;
+      const indexes = binding.sourceTokenIds.map((tokenId) => tokenIndex.get(tokenId));
       return indexes.every((index): index is number => index !== undefined)
         && Math.min(...indexes) >= breakPoint.tokenIndex;
     });
@@ -81,7 +90,8 @@ function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string
       throw new Error("Caption Cue break must lie between two complete Alignment Units");
     }
     const previous = units[next - 1]!;
-    const previousIndexes = previous.sourceTokenIds.map((tokenId) => tokenIndex.get(tokenId));
+    const previousBinding = bindings.find((candidate) => candidate.unitId === previous.id)!;
+    const previousIndexes = previousBinding.sourceTokenIds.map((tokenId) => tokenIndex.get(tokenId));
     if (previousIndexes.some((index) => index === undefined)
       || Math.max(...previousIndexes as number[]) + 1 !== breakPoint.tokenIndex) {
       throw new Error("Caption Cue break cannot split an Alignment Unit");
@@ -93,21 +103,42 @@ function projectCaption(parsed: ParsedNarrative, id: string, narrativeId: string
   // Keep explicit breaks, but de-duplicate the boundary when `||` was placed
   // immediately before `</segment>`.
   const breaks = new Set(cueBreaks.map((item) => item.afterUnitId));
-  for (let index = 0; index < units.length - 1; index += 1) {
-    if (units[index]!.segmentId === units[index + 1]!.segmentId) continue;
-    breaks.add(units[index]!.id);
+  const cues: CaptionCue[] = [];
+  let cueUnits: string[] = [];
+  let cueContext: typeof unitContexts[number] | undefined;
+  const flushCue = (): void => {
+    if (cueUnits.length === 0) return;
+    cues.push({ id: `${documentId}:cue:${cues.length + 1}`, unitIds: cueUnits,
+      ...(cueContext?.role === undefined ? {} : { role: cueContext.role }) });
+    cueUnits = [];
+    cueContext = undefined;
+  };
+  for (const [index, unit] of units.entries()) {
+    const context = unitContexts[index]!;
+    const previous = units[index - 1];
+    if (cueUnits.length > 0 && (cueContext?.groupId !== context.groupId
+      || (previous !== undefined && breaks.has(previous.id)))) flushCue();
+    cueContext ??= context;
+    cueUnits.push(unit.id);
   }
+  flushCue();
   return {
-    narrativeId,
-    id,
-    units,
-    words,
-    cueBreaks: units.filter((unit) => breaks.has(unit.id)).map((unit) => ({ afterUnitId: unit.id })),
+    document: { id: documentId, units, words, cues },
+    binding: { id: bindingId, narrativeId, documentId, units: bindings },
   };
 }
 
 export function captionDocument(parsed: ParsedNarrative, id: string, narrativeId: string): CaptionDocument {
-  return projectCaption(parsed, id, narrativeId);
+  return projectCaption(parsed, id, narrativeId).document;
+}
+
+export function narrativeCaptionBinding(
+  parsed: ParsedNarrative,
+  documentId: string,
+  narrativeId: string,
+  bindingId?: string,
+): NarrativeCaptionBinding {
+  return projectCaption(parsed, documentId, narrativeId, bindingId).binding;
 }
 
 export function captionDocumentValue(parsed: ParsedNarrative, id: string, narrativeId: string): CanonicalValue {
@@ -180,7 +211,6 @@ export function narrativeMomentValue(moment: ParsedNarrative["moments"][number],
 export function narrativeValue(parsed: ParsedNarrative, id: string): CanonicalValue {
   return canonicalize({
     id,
-    caption: captionDocument(parsed, `${id}.caption`, id),
     segments: parsed.segments.map((segment) => ({
       id: segment.id,
       startAnchorId: segment.startAnchorId,
@@ -209,14 +239,12 @@ export function narrativeValue(parsed: ParsedNarrative, id: string): CanonicalVa
       endAnchorId: selection.close.boundary.anchorId,
     })),
     moments: parsed.moments.map((moment) => ({ id: moment.id, anchorId: moment.boundary.anchorId })),
-    semanticIndex: {
-      anchors: parsed.semanticIndex.anchors.map((anchor) => ({
-        id: anchor.id,
-        kind: anchor.kind,
-        ...("segmentId" in anchor ? { segmentId: anchor.segmentId } : {}),
-        ...("tokenId" in anchor && anchor.tokenId !== undefined ? { tokenId: anchor.tokenId } : {}),
-      })),
-    },
+    anchors: parsed.anchors.map((anchor) => ({
+      id: anchor.id,
+      kind: anchor.kind,
+      ...("segmentId" in anchor ? { segmentId: anchor.segmentId } : {}),
+      ...("tokenId" in anchor && anchor.tokenId !== undefined ? { tokenId: anchor.tokenId } : {}),
+    })),
   });
 }
 

@@ -1,35 +1,28 @@
 import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { NodeRuntimeHost } from "@hypit/runtime-host-node";
 import { orderedBuildId } from "@hypit/protocol";
-import { parseSourceHeader } from "@hypit/source";
+import { parseSourceHeader } from "@hypit/source/text";
 
 import { unreachedGenerations } from "./reachability.js";
 import { checkRunFile, collectRunFrontends, loadRunFile } from "./run-file.js";
 import type { CliDistribution } from "./distribution.js";
-import type {
-  CliRuntime,
-  CliRuntimeController,
-} from "./runtime-port.js";
+import type { CliApplicationContext } from "./application.js";
+import type { CliRuntime, CliRuntimeHost } from "./runtime-port.js";
 import { createPlanOutput, createPricingOutput, writeCliHelp, writeCliOutput } from "./output.js";
-import type { CliIo, CliMachineView } from "./output.js";
+import type { CliIo } from "./output.js";
+import type { OperationalMachineView } from "./machine-view.js";
 import { parseCommand } from "./arguments.js";
 import type { CliCommand, RuntimeOption } from "./command.js";
+import { commandHint } from "./command-hint.js";
 import { assertPlannedRequests, assertPreflight, createCatalogDescriptor, describePlanNeeds, describePlanPricing, describePlanProviders, evaluatePlanNeeds, preflightPlan } from "./build-planning.js";
 import { buildProgressLines, observeBuild } from "./observation.js";
 import { isProjectResultCommand, runProjectResultCommand } from "./commands/results.js";
 import { isEnvironmentCommand, runEnvironmentCommand } from "./commands/environment.js";
 import { isExecutionCommand, runExecutionCommand } from "./commands/execution.js";
 import { inlineValuePreview } from "./runtime-view.js";
-import { resolvePackageRoot, resolveProjectRoot } from "@hypit/project-context-node";
+import { resolveProjectRoot } from "@hypit/project";
 import { loadDiscoveredSourcePackages } from "./source-packages.js";
-import {
-  clearRuntimeProfile,
-  findRuntimeProfile,
-  selectRuntimeProfile,
-} from "@hypit/project-context-node";
 import {
   buildStatusView,
   cliTypeName,
@@ -40,12 +33,12 @@ function createPublicBuildId(now = Date.now()): string {
   return orderedBuildId(now, randomBytes(5).toString("hex").toUpperCase());
 }
 
-async function loadRuntime(host: NodeRuntimeHost, endpoints: readonly string[]): Promise<CliRuntime> {
+async function loadRuntime(host: CliRuntimeHost, endpoints: readonly string[]): Promise<CliRuntime> {
   return await host.createRuntime({ endpoints });
 }
 
-function commandWorkspaceRoot(command: CliCommand): string | undefined {
-  return "workspaceRoot" in command ? command.workspaceRoot : undefined;
+function commandProjectRootOption(command: CliCommand): string | undefined {
+  return "projectRoot" in command ? command.projectRoot : undefined;
 }
 
 function commandPackageRoot(command: CliCommand): string | undefined {
@@ -60,6 +53,7 @@ export async function runCli(
   argv: readonly string[],
   io: CliIo,
   distribution: CliDistribution,
+  context?: Pick<CliApplicationContext, "cwd" | "resolveProjectRoot">,
 ): Promise<void> {
   if (argv.length === 0 || argv[0] === "help" || argv.includes("--help")) {
     const topic = argv[0] === "help" ? argv[1] : argv[0] === "--help" ? undefined
@@ -67,20 +61,20 @@ export async function runCli(
     writeCliHelp(io, topic);
     return;
   }
-  const args = parseCommand(argv);
+  const cwd = context?.cwd ?? process.cwd();
+  const args = parseCommand(argv, cwd);
   let resolvedProject: Promise<string> | undefined;
   const commandProjectRoot = async (): Promise<string> => {
-    const workspaceRoot = commandWorkspaceRoot(args);
-    resolvedProject ??= resolveProjectRoot({
-      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
-      cwd: process.cwd(),
-    });
+    const projectRoot = commandProjectRootOption(args);
+    resolvedProject ??= context === undefined
+      ? resolveProjectRoot({ ...(projectRoot === undefined ? {} : { projectRoot }), cwd })
+      : context.resolveProjectRoot(projectRoot);
     return await resolvedProject;
   };
   const packageRootForProject = async (projectRoot?: string): Promise<string> =>
-    commandPackageRoot(args) ?? await resolvePackageRoot(projectRoot ?? await commandProjectRoot());
+    commandPackageRoot(args) ?? projectRoot ?? await commandProjectRoot();
   const writeOperational = (
-    machine: CliMachineView,
+    machine: OperationalMachineView,
     title: string,
     status: "success" | "warning" | "error" | "info" = "info",
     facts: readonly (readonly [string, string])[] = [],
@@ -88,8 +82,8 @@ export async function runCli(
   ): void => writeCliOutput(io, {
     ...args.presentation,
   }, { kind: "operational", machine, title, status, facts, lines });
-  const runtimeHosts = new Map<string, Promise<NodeRuntimeHost>>();
-  const runtimeHost = async (path: string, requestedPackageRoot?: string): Promise<NodeRuntimeHost> => {
+  const runtimeHosts = new Map<string, Promise<CliRuntimeHost>>();
+  const runtimeHost = async (path: string, requestedPackageRoot?: string): Promise<CliRuntimeHost> => {
     const profile = resolve(path);
     const packageRoot = requestedPackageRoot ?? await packageRootForProject();
     const key = `${profile}\u0000${packageRoot}`;
@@ -113,100 +107,25 @@ export async function runCli(
       ...(distribution.packageRoot === undefined ? {} : { distributionPackageRoot: distribution.packageRoot }),
     });
   };
-  if (args.command === "_worker") {
-    await (await runtimeHost(
-      args.profile,
-      args.packageRoot ?? await packageRootForProject(),
-    )).runWorker(args.readyFile, args.workerOwner,
-      args.executionRoot === undefined ? undefined : { dataRoot: args.executionRoot });
-    return;
-  }
-  if (args.command === "runtime" && args.action === "init") {
-    if (distribution.initialRuntimeProfile === undefined) {
-      throw new Error("This Hypit Distribution does not provide an initial Runtime Profile");
-    }
-    const projectRoot = await commandProjectRoot();
-    const profile = resolve(args.profile ?? resolve(projectRoot, "hypit.runtime.json"));
-    try {
-      await writeFile(profile, `${JSON.stringify(distribution.initialRuntimeProfile, undefined, 2)}\n`, {
-        encoding: "utf8",
-        flag: "wx",
-      });
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "EEXIST") {
-        throw new Error(`Runtime Profile already exists: ${profile}; select it with hypit runtime use or choose another path`);
-      }
-      throw error;
-    }
-    const selected = await selectRuntimeProfile(projectRoot, profile);
-    writeOperational({
-      format: "hypit.cli-runtime-init@1",
-      profile: selected.profile,
-      project: selected.projectRoot,
-      selected: true,
-    }, "Runtime Profile created", "success", [
-      ["Profile", selected.profile],
-      ["Project", selected.projectRoot],
-    ], ["No package was installed, no service was contacted and no Worker was started."]);
-    return;
-  }
-  if (args.command === "runtime" && args.action === "use") {
-    const profile = resolve(args.profile);
-    const selected = await selectRuntimeProfile(await commandProjectRoot(), profile);
-    writeOperational({
-      format: "hypit.cli-runtime-selection@1",
-      selected: true,
-      profile: selected.profile,
-      project: selected.projectRoot,
-    }, "Runtime selected", "success", [
-      ["Profile", selected.profile],
-      ["Project", selected.projectRoot],
-    ]);
-    return;
-  }
-  if (args.command === "runtime" && args.action === "unset") {
-    const cleared = await clearRuntimeProfile(await commandProjectRoot());
-    writeOperational({
-      format: "hypit.cli-runtime-selection@1",
-      selected: false,
-      removed: cleared !== undefined,
-      ...(cleared === undefined ? {} : { profile: cleared.profile, project: cleared.projectRoot }),
-    }, cleared === undefined ? "No Runtime was selected" : "Runtime selection removed",
-    cleared === undefined ? "info" : "success", cleared === undefined ? [] : [
-      ["Profile", cleared.profile], ["Project", cleared.projectRoot],
-    ]);
-    return;
-  }
-
   let runtimeProfile = acceptsRuntimeContext(args) ? args.runtimeProfile : undefined;
-  let runtimeSelectionFile: string | undefined;
-  const runtimeWasExplicit = runtimeProfile !== undefined;
-  let runtimeNeedsHint = runtimeWasExplicit;
+  let runtimeFromProject = false;
   if (acceptsRuntimeContext(args) && runtimeProfile === undefined && args.command !== "logs") {
-    const selected = await findRuntimeProfile(await commandProjectRoot());
+    const selected = await distribution.resolveProjectRuntime?.(await commandProjectRoot());
     if (selected !== undefined) {
       runtimeProfile = selected.profile;
-      runtimeSelectionFile = selected.selectionFile;
-      runtimeNeedsHint = false;
+      runtimeFromProject = true;
     }
   }
-  const runtimeController = async (profile: string): Promise<CliRuntimeController> => {
-    const packageRoot = await packageRootForProject();
-    return await (await runtimeHost(profile, packageRoot)).controller({
-      packageRoot,
-    });
-  };
   if (isEnvironmentCommand(args)) {
     await runEnvironmentCommand({
       args,
       runtimeProfile,
-      runtimeSelectionFile,
+      runtimeFromProject,
       io,
       distribution,
       projectRoot: await commandProjectRoot(),
       packageRootForProject,
       runtimeHost,
-      runtimeController,
       write: writeOperational,
     });
     return;
@@ -228,19 +147,19 @@ export async function runCli(
   if (isExecutionCommand(args)) {
     await runExecutionCommand({
       args,
+      projectRoot: await commandProjectRoot(),
       runtimeProfile,
       io,
       runtimeHost,
-      runtimeController,
       openProjectResults: projectResults,
-      resolveProjectRuntime: async () => (await findRuntimeProfile(await commandProjectRoot()))?.profile,
+      resolveProjectRuntime: async () => (await distribution.resolveProjectRuntime?.(await commandProjectRoot()))?.profile,
       write: writeOperational,
     });
     return;
   }
   const effectiveWorkspaceRoot = await commandProjectRoot();
   const projectResultsRoot = effectiveWorkspaceRoot;
-  const sourcePackageRoot = args.packageRoot ?? await resolvePackageRoot(effectiveWorkspaceRoot);
+  const sourcePackageRoot = args.packageRoot ?? effectiveWorkspaceRoot;
   const loadedPackageSet = distribution.discoverSourcePackages === undefined
     ? undefined
     : await loadDiscoveredSourcePackages(distribution, {
@@ -263,14 +182,14 @@ export async function runCli(
       : { distributionPackageRoot: distribution.packageRoot }),
     packageContributions,
   });
-  const workspace = await compiler.openFile(args.source);
-  const sourceHeader = parseSourceHeader(workspace.entry.name, workspace.entry.text);
-  const runMode = runFrontends.some((frontend) => frontend.id === sourceHeader.using);
-  const authorMode = compiler.supportsFrontend(sourceHeader.using);
+  const workspace = await compiler.openEntry(args.source);
+  const selectedFrontend = workspace.entry.frontend;
+  const runMode = runFrontends.some((frontend) => frontend.id === selectedFrontend);
+  const authorMode = compiler.supportsFrontend(selectedFrontend);
   if (runMode === authorMode) {
     const message = runMode
-      ? `Frontend ${sourceHeader.using} is ambiguously registered as Author and Run`
-      : `No trusted Author or Run compiler accepts Frontend ${sourceHeader.using}`;
+      ? `Frontend ${selectedFrontend} is ambiguously registered as Author and Run`
+      : `No trusted Author or Run compiler accepts Frontend ${selectedFrontend}`;
     throw new Error(message);
   }
   if ((args.command === "plan" || args.command === "pricing" || args.command === "build") && !runMode) {
@@ -290,7 +209,7 @@ export async function runCli(
           ok: true,
           run: projectPath(loaded.source, effectiveWorkspaceRoot),
           author: projectPath(loaded.authorSource, effectiveWorkspaceRoot),
-          frontend: sourceHeader.using,
+          frontend: selectedFrontend,
           targetCount: loaded.document.targets.length,
           targets: loaded.document.targets.map((item) => item.output),
           candidates: loaded.document.candidates.length,
@@ -312,7 +231,7 @@ export async function runCli(
         return;
     }
     {
-      const result = await compiler.compileSource(workspace.entry, workspace);
+      const result = await compiler.compileResolvedSource(workspace.entry, workspace);
       const authorFacing = result.exports.filter((item) =>
         !item.name.includes(".__") && !/\.binding-\d+$/u.test(item.name) && !item.name.endsWith(".bindings"));
       const outputs = authorFacing.filter((item) => item.ref.kind === "logical-output");
@@ -322,8 +241,8 @@ export async function runCli(
         format: "hypit.cli-check@1" as const,
         sourceKind: "author" as const,
         ok: true,
-        source: projectPath(workspace.entry.name, effectiveWorkspaceRoot),
-        frontend: sourceHeader.using,
+        source: projectPath(workspace.entry.unit.name, effectiveWorkspaceRoot),
+        frontend: selectedFrontend,
         units: result.closure.units.length,
         assets: result.attachments.length,
         modules: modules.length,
@@ -347,6 +266,7 @@ export async function runCli(
     if (runtimeProfile === undefined) {
       throw new Error("build requires a Runtime; run hypit runtime init, select one with runtime use, or pass --runtime <profile>");
     }
+    const commandScope = { projectRoot: projectResultsRoot, runtimeProfile: resolve(runtimeProfile) };
     const buildResults = await projectResults(projectResultsRoot);
     let loadedRun;
     try {
@@ -379,6 +299,7 @@ export async function runCli(
         run: {
           path: loadedRun.path,
         },
+        targets: loadedRun.run.graph.targets,
       });
       const request = {
         // One CLI invocation is one execution instance. Source and Plan identity
@@ -386,8 +307,9 @@ export async function runCli(
         id: createPublicBuildId(),
         definition: result.definition,
         ...(loadedPackageSet === undefined ? {} : {
-          componentPackages: loadedPackageSet
-            .filter((item) => (item.contribution.components?.length ?? 0) > 0)
+          executionPackages: loadedPackageSet
+            .filter((item) => (item.contribution.facets?.some((facet) =>
+              facet.abi === "hypit.producer-package@1" || facet.abi === "hypit.admission-package@1") ?? false))
             .map((item) => item.specifier),
         }),
         catalog,
@@ -401,9 +323,6 @@ export async function runCli(
         },
       } as const;
       const host = await runtimeHost(runtimeProfile);
-      const controller = await host.controller({
-        packageRoot: sourcePackageRoot,
-      });
       const evaluated = await evaluatePlanNeeds(result.definition, packageContributions);
       const providers = await describePlanProviders(host, evaluated.state, evaluated);
       assertPlannedRequests(evaluated.state, evaluated, providers);
@@ -413,7 +332,7 @@ export async function runCli(
       // installing or starting declared programs.
       assertPreflight(preflight);
       try {
-        await controller.worker.up({
+        await host.ensureExecution({
           ...(args.maxWaitMs === undefined ? {} : { maxWaitMs: args.maxWaitMs }),
         });
       } catch (error) {
@@ -435,7 +354,7 @@ export async function runCli(
         ]),
       ].join(" · ");
       if (args.follow && "view" in built && !args.presentation.json) {
-        const acceptedView = buildStatusView({ id: built.id, runtime: built.view });
+        const acceptedView = buildStatusView({ id: built.id, runtime: built.view, commandScope });
         const targets = built.view.targets.slice(0, args.limit);
         writeOperational({
           format: "hypit.cli-build@1",
@@ -451,16 +370,16 @@ export async function runCli(
       if (args.follow && runtime !== undefined) {
         built = await observeBuild(runtime, built, {
           ...(args.maxWaitMs === undefined ? {} : { maxWaitMs: args.maxWaitMs }),
-          controller,
+          executionStatus: async () => await host.executionStatus(),
+          commandScope,
           readResult: async () => await buildResults.repository.read(built.id),
-          ...(args.presentation.json ? {} : {
-            onProgress: (progress) => {
-              for (const line of buildProgressLines(progress, {
-                verbose: args.presentation.verbose,
-                limit: args.limit,
-              })) io.write(`${line}\n`);
-            },
-          }),
+          onProgress: (progress) => {
+            const report = io.writeProgress ?? (args.presentation.json ? undefined : io.write);
+            for (const line of buildProgressLines(progress, {
+              verbose: args.presentation.verbose,
+              limit: args.limit,
+            })) report?.(`${line}\n`);
+          },
         });
       }
       const finished = "completion" in built;
@@ -471,10 +390,13 @@ export async function runCli(
       const finishedResult = finished
         ? await buildResults.repository.read(built.id)
         : undefined;
-      const targetOutputs = new Set(built.state.targets.map((target) => target.output));
       const presentation = catalog;
-      const targetPublishedOutputs = presentation.publishedOutputs.filter((published) =>
-        targetOutputs.has(published.ref.id));
+      const targetNames = new Set(finishedResult?.targets ?? []);
+      const targetOutputs = new Set(presentation.targets?.map((target) => target.id)
+        ?? built.state.targets.map((target) => target.output));
+      const targetPublishedOutputs = presentation.publishedOutputs.filter((published) => finishedResult === undefined
+        ? targetOutputs.has(published.ref.id)
+        : targetNames.has(published.name));
       const targetPresentations = targetPublishedOutputs.flatMap((published) => {
         const selection = built.state.plan.outputBindings.find((item) => item.output === published.ref.id);
         const record = selection === undefined
@@ -491,6 +413,7 @@ export async function runCli(
       });
       const buildView = buildStatusView({
         id: built.id,
+        commandScope,
         ...(activeView === undefined ? {} : { runtime: activeView }),
         ...(finishedResult === undefined ? {} : { result: finishedResult }),
         verbose: args.presentation.verbose,
@@ -501,7 +424,7 @@ export async function runCli(
           ? buildView
           : { ...buildView, title: args.title },
       };
-      const runtimeHint = runtimeNeedsHint ? ` --runtime ${runtimeProfile}` : "";
+      const resultScope = { projectRoot: projectResultsRoot };
       const resultTargets = finishedResult?.targets.flatMap((name) => {
         const output = finishedResult.outputs[name];
         return output === undefined ? [] : [{ name, output }];
@@ -509,11 +432,11 @@ export async function runCli(
       const finishedLines = resultTargets.length === 0 && targetPresentations.length === 0
         ? [
             ...(completionReason === undefined ? [] : [`Reason   ${completionReason}`]),
-            `Inspect  hypit inspect ${built.id}`,
+            `Inspect  ${commandHint(["inspect", built.id], resultScope)}`,
           ]
         : [
             ...(completionReason === undefined ? [] : [`Reason   ${completionReason}`]),
-            `Inspect  hypit inspect ${built.id}`,
+            `Inspect  ${commandHint(["inspect", built.id], resultScope)}`,
             ...resultTargets
               .filter((item) => item.output.value.kind === "inline")
               .slice(0, args.limit)
@@ -524,14 +447,14 @@ export async function runCli(
               .filter((item) => item.output.value.kind !== "inline")
               .slice(0, args.limit)
               .map((item) =>
-                `Export   hypit get ${built.id} --output ${item.name} --to <path>`),
+                `Export   ${commandHint(["get", built.id, "--output", item.name], resultScope)} --to <path>`),
             ...(resultTargets.length > 0 ? [] : targetPresentations
               .filter((item) => item.inline !== undefined)
               .slice(0, args.limit)
               .map((item) => `Result   ${item.published.name} = ${item.inline}`)),
           ];
       const humanTitle = issue !== undefined
-        ? "Result needs attention"
+        ? "Build needs attention"
         : finished
           ? buildOutcome === "complete"
             ? "Build complete"
@@ -551,14 +474,14 @@ export async function runCli(
           ] : []),
           ...(issue === undefined ? [] : [
             ["Execution", buildOutcome ?? machine.build.work.state] as const,
-            ["Result", "needs attention"] as const,
+            [issue.scope === "cleanup" ? "Cleanup" : "Result", "needs attention"] as const,
           ]),
         ], finished ? finishedLines : issue !== undefined ? [
-          `Result   ${issue.scope}: ${issue.message}`,
-          `Finish   hypit result finish ${built.id}${runtimeHint}`,
+          `Attention  ${issue.scope}: ${issue.message}`,
+          `Finish   ${commandHint(["result", "finish", built.id], commandScope)}`,
         ] : [
-          `Watch    hypit status ${built.id}${runtimeHint} --watch`,
-          `Cancel   hypit cancel ${built.id}${runtimeHint}`,
+          `Watch    ${commandHint(["status", built.id, "--watch"], commandScope)}`,
+          `Cancel   ${commandHint(["cancel", built.id], commandScope)}`,
         ]);
       if (buildOutcome === "failed" || issue !== undefined) io.setExitCode?.(1);
     } finally {
@@ -591,8 +514,10 @@ export async function runCli(
         ...(args.limit === undefined ? {} : { limit: args.limit }),
         machine: createPricingOutput(
           projectPath(loaded.path, effectiveWorkspaceRoot), pricing, needs, args.presentation.verbose,
+          evaluated.producerFailures,
         ),
       });
+      if (evaluated.producerFailures.length > 0) io.setExitCode?.(1);
       return;
     }
     const providers = planHost === undefined ? undefined : await describePlanProviders(planHost, evaluated.state, evaluated);
@@ -615,18 +540,23 @@ export async function runCli(
     const localRequestCount = providers?.filter((item) => item.status === "resolved" && item.pricing?.kind === "local").length ?? 0;
     const providerRequestCount = providers?.filter((item) => item.status === "resolved" && item.pricing?.kind !== "local").length;
     const requestIssueCount = needs.filter((item) => item.issue !== undefined).length;
+    const producerFailures = evaluated.producerFailures;
+    const producerFailureCount = producerFailures.length;
     writeCliOutput(io, args.presentation, {
       kind: "plan",
       machine: createPlanOutput({
         format: "hypit.cli-plan@1",
         ok: (preflight?.ok ?? true) && unresolvedRequestCount === 0
-          && unsupportedRequestCount === 0 && requestIssueCount === 0,
+          && unsupportedRequestCount === 0 && requestIssueCount === 0
+          && producerFailureCount === 0,
         run: projectPath(loaded.path, effectiveWorkspaceRoot),
         targetCount: targets.length,
         targets,
         steps: result.definition.plan.steps.length,
         requestCount: needs.length,
         requestIssueCount,
+        producerFailureCount,
+        producerFailures,
         ...(providerRequestCount === undefined ? {} : { providerRequestCount }),
         ...(providers === undefined ? {} : { localRequestCount, unresolvedRequestCount, unsupportedRequestCount }),
         choiceCount: allChoices.length,
@@ -644,7 +574,8 @@ export async function runCli(
       }, { verbose: args.presentation.verbose, limit: args.limit }),
     });
     if ((preflight !== undefined && !preflight.ok) || unresolvedRequestCount > 0
-      || unsupportedRequestCount > 0 || requestIssueCount > 0) io.setExitCode?.(1);
+      || unsupportedRequestCount > 0 || requestIssueCount > 0
+      || producerFailureCount > 0) io.setExitCode?.(1);
   } finally {
     await planResults?.close();
   }

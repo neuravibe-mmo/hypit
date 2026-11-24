@@ -19,6 +19,15 @@
 </p>
 
 <p align="center">
+  <a href="https://trendshift.io/repositories/229030"><img alt="Trendshift #1 Repository of the Day" src="https://trendshift.io/api/badge/trendshift/repositories/229030/daily"></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/229030"><img alt="Trendshift #1 TypeScript Repository of the Day" src="https://trendshift.io/api/badge/trendshift/repositories/229030/daily?language=TypeScript"></a>
+  <a href="https://trendshift.io/repositories/229030?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-229030" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/229030/weekly?language=TypeScript" alt="hypit-ai/hypit | Trendshift TypeScript Weekly" width="250" height="55"></a>
+</p>
+
+<p align="center">
   <img alt="Stars" src="https://img.shields.io/github/stars/hypit-ai/hypit?style=flat-square&color=FFD700&logo=github&logoColor=white&label=Stars">
   <a href="./package.json"><img alt="Node 22.15+" src="https://img.shields.io/badge/Node.js-22.15%2B-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white"></a>
   <a href="./package.json"><img alt="pnpm 10.33" src="https://img.shields.io/badge/pnpm-10.33-F69220?style=flat-square&logo=pnpm&logoColor=white"></a>
@@ -27,7 +36,7 @@
 </p>
 
 <p align="center">
-  <a href="https://hypit.ai"><img alt="Visit our website" src="https://img.shields.io/badge/Visit%20our%20website-DF3C68?style=for-the-badge&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjI1Ny4wMyAyODcuNDggNDg2Ljk0IDQyNi4wNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTczMy4wMDEsNDYyLjU5MmMtMTEuNDQtMTYuNTEtMzAuMjg1LTI2LjM0NC01MC4zNTMtMjYuMzQ0aC0xNzguNzA1Yy0yMy40OTMsMC00Ny42NzUsMTQuMjM0LTU2LjYyOCwzNS45NjdsLTU0LjA2NSwxNDUuMDUzYy04LjgsMjEuNTIzLTguNjg2LDQ2LjAxMSw0LjI0Nyw2NS4zNTIsMTIuOTksMTkuNDE4LDM3LjAzOCwzMC44OTcsNjAuMzk3LDMwLjg5N2gxNjQuNDljMjcuMDEzLDAsNTEuNDYzLTE2Ljk4OSw2MC45MTQtNDIuMjhsNTYuODAxLTE1Mi4yMjdjNy4wMjEtMTguODI1LDQuMzgxLTM5LjkwOC03LjA1OS01Ni4zOTl2LS4wMzhoLS4wMzh2LjAxOVpNNjMzLjk3OCw2NTIuODEzYy0xLjc5OCw0LjgyMS02LjQ4NSw4LjA3My0xMS42MzIsOC4wNzNoLTE1OS42NWMtOC4zMDMsMC0xMi43OC01LjM1Ny0xNC4zMjktNy42MzNzLTQuNzgzLTguNDc1LTEuNjA3LTE2LjE0N2w0NS42MjgtMTI2LjcyNWM0LjM4MS0xMi4xNDgsMTUuNDU4LTIwLjc5NiwyOC4zNTItMjEuNDY1LjYzMS0uMDM4LDEuMjgyLS4wMzgsMS45NTEtLjAzOGgxNDQuMjY5czIzLjkzMywyLjcxNywxNy43NzMsMjcuOTUxbC01MC43NTUsMTM2LjAwNGgwdi0uMDE5Wk0zNTYuMjUsNjIzLjEyMnMtNDIuNzc3LTIyLjE3My0zMy43ODYtNjIuNDgzbDU2Ljc2Mi0xNTcuMzE2YzkuMTQ1LTI1LjM0OSwzMy4yMTItNDIuMjYxLDYwLjE2OC00Mi4yNjFoMTgxLjc4NWMxMS45NTcsMCwyMy4xNDksNS43OTcsMzAuMDU1LDE1LjU3M2wyNi41NzMsMzcuNjVoLTIxNi4xMjVjLTE2LjY0NCwwLTMxLjU0NywxMC4zNS0zNy4zNDQsMjUuOTYxbC02OC4wODgsMTgyLjg5NWgwdi0uMDE5Wk0yOTIuMDY0LDU0OS41NDNzLTQyLjc5Ny0yMi4xNzMtMzMuNzg2LTYyLjQ4M2w1Ni43NjItMTU3LjMxNmM5LjE2NC0yNS4zNDksMzMuMjMxLTQyLjI2MSw2MC4xNjgtNDIuMjYxaDE3Mi4wMDljMTEuOTU3LDAsMjMuMTQ5LDUuNzk3LDMwLjA1NSwxNS41NzNsMjYuNTczLDM3LjY1aC0yMDYuMzExYy0xNi42NDQsMC0zMS41NDcsMTAuMzUtMzcuMzQ0LDI1Ljk2MWwtNjguMDg4LDE4Mi44OTVoLS4wMzh2LS4wMTlaIi8%2BPC9zdmc%2B"></a>
+  <a href="https://hypit.ai"><img alt="Visit our website" src="https://img.shields.io/badge/Visit%20our%20website-DF3C68?style=for-the-badge&logo=hypit&logoColor=white"></a>
   <a href="https://discord.gg/85hnyQnxpn"><img alt="Join our Discord" src="https://img.shields.io/badge/Join%20our%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://t.me/hypitai"><img alt="Join our Telegram" src="https://img.shields.io/badge/Join%20our%20Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"></a>
   <a href="https://x.com/hypitai"><img alt="Follow @hypitai on X" src="https://img.shields.io/badge/Follow%20%40hypitai-000000?style=for-the-badge&logo=x&logoColor=white"></a>
@@ -57,7 +66,7 @@
 
 Hypit gives AI agents (Claude Code, Codex...) a language and system to create video. Drop in a video, and your agent clones it as a complete workflow: footage, captions, B-roll and effects, all anchored to words instead of seconds.
 
-**To be clear:** cloning a video is the fastest way in, not the only one. You can start from our templates, or just describe the video you want and your agent writes the workflow from scratch. Generation models are optional too: a workflow can compile captions, motion graphics and code-rendered visuals into a finished video without calling a single model, so a video can cost exactly $0.
+**To be clear:** cloning a video is the fastest way in, not the only one. You can start from our templates, or just describe the video you want and your agent writes the workflow from scratch. Generation models are optional too: a workflow can compile captions, motion graphics and code-rendered visuals into a finished video without calling a generation model or incurring its service charges.
 
 ![SVML source and live video preview](https://github.com/user-attachments/assets/981c28e8-ddab-4164-85bc-03b5d71275dc)
 
@@ -71,6 +80,13 @@ npx skills add hypit-ai/hypit -g
 
 This installs the Skill. On first use, your agent checks for the Hypit executable and helps prepare
 it if needed. Your video project can live anywhere.
+
+Hypit is free to use; your Coding Agent and model services have their own accounts and charges.
+HypiHub is our recommended hosted model service. You can also use your own API or local models;
+tell your agent the service name and API documentation so it can set up the appropriate connection.
+
+[Agent environments and entry partners](./docs/guide/agents.md) ·
+[Model and deployment services](./docs/guide/service-partners.md)
 
 ## Examples
 
@@ -146,7 +162,7 @@ The `/hypit` skill is available to coding agents. Start a session in any empty o
 directory and ask it to create videos for you:
 
 ```text
-/hypit Clone this video: /path/to/video
+/hypit Clone this video: /path/to/video.mp4, and replace the ranking content with a comparison of Hypit (official website: hypit.ai) with other AI video products.
 ```
 
 Or start without a reference video:
@@ -162,9 +178,9 @@ Your agent can check the environment, request the credentials the video needs, g
 ## Why Hypit
 
 - **Clone any video:** drop in a video, get the whole workflow — footage, captions, B-roll, effects. Not a script breakdown.
-- **One workflow, 100 variants:** the second video costs almost nothing; the hundredth is a loop.
-- **Pluggable components:** swap the host without touching the captions. Use the library, fork it, or write your own.
-- **Open source, $0:** no seat pricing, no per-render fees, no watermark. Arcads charges $220/mo, Creatify $39, before you render anything — but Hypit is $0.
+- **One workflow, 100 variants:** reuse the composition and existing material; generate the parts that change.
+- **Pluggable components:** swap the host without touching the captions. Use an installed package, adapt an example, or write your own.
+- **Open source:** no Hypit seat pricing, per-render fees or added watermark. Model-service usage is billed by the service you choose.
 
 ## What Hypit Can Build
 
@@ -175,7 +191,7 @@ Drop in a video and your agent clones the whole workflow — or describe what yo
 - **TikTok Shop and affiliate videos** — one format that converts, a new SKU every day. Swap the product, the price, the CTA; the structure that worked stays untouched.
 - **AI UGC and talking heads** — narration, word-level captions, B-roll, comment stickers, beat-synced cuts, all wired automatically.
 - **Podcast and interview clips** — split-screen layouts, speaker-aware captions, reaction overlays.
-- **Code-rendered videos** — visuals driven entirely by front-end code. Compiled from source, zero API calls, 0 dollars a video.
+- **Code-rendered videos** — visuals driven entirely by front-end code, rendered locally without generation API calls.
 - **Localized versions** — the same video in ten languages. Rewrite a line and the timing re-flows itself.
 
 ## Stay Tuned with Us
@@ -202,21 +218,138 @@ commands and the repository layout.
 <table>
   <tr>
     <td>Bug reports</td>
-    <td><a href="https://github.com/hypit-ai/hypit/issues/new?labels=bug">Open an issue</a></td>
+    <td><a href="https://github.com/hypit-ai/hypit/issues/new?template=bug_report.yml">Open an issue</a></td>
   </tr>
   <tr>
     <td>Feature requests</td>
-    <td><a href="https://github.com/hypit-ai/hypit/issues/new?labels=enhancement">Open an issue</a></td>
+    <td><a href="https://github.com/hypit-ai/hypit/issues/new?template=feature_request.yml">Open an issue</a></td>
   </tr>
   <tr>
     <td>Questions</td>
-    <td><a href="https://discord.gg/85hnyQnxpn">Discord</a> or <a href="https://t.me/hypit">Telegram</a></td>
+    <td><a href="https://discord.gg/85hnyQnxpn">Discord</a> or <a href="https://t.me/hypitai">Telegram</a></td>
+  </tr>
+  <tr>
+    <td>Upgrading existing projects</td>
+    <td><a href="./migrations/0.3.md">0.3 migration guide</a> · <a href="./migrations/0.3.1.md">0.3.1 SDK migration guide</a></td>
+  </tr>
+</table>
+
+## Launch Partners
+
+<table>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://watcha.cn/r/geIiJJ">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/watcha-dark.png">
+          <img alt="Watcha" src="./docs/public/watcha-light.png" width="170">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://watcha.cn/r/geIiJJ">Watcha</a> is an innovative ecosystem and community built for AI builders, connecting great products with high-quality users to turn every Demo into reality. Starting from AI product discovery and genuine feedback, Watcha provides product publishing, distribution, and reputation tracking to support builders from launch to early adoption.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://tokendance.space/?utm_source=hypit">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/tokendance-dark.png">
+          <img alt="TokenDance" src="./docs/public/tokendance-light.png" width="165">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://tokendance.space/?utm_source=hypit">TokenDance</a> offers builders a unified multi-model gateway with optimized inference costs. Through programs like the Billion-Token Subsidy and the Developer Program, TokenDance helps early-stage builders cut costs so they can focus on product validation and growth.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://agentsky.dev/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/agentsky-dark.png">
+          <img alt="AgentSky" src="./docs/public/agentsky-light.png" width="165">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://agentsky.dev/">AgentSky</a> is a cloud platform for running AI agents such as Claude Code, Codex, OpenClaw, and Hermes. Each agent works on its own cloud computer, helping users tackle coding, research, and everyday tasks. Through CLI and MCP integrations, users can discover agents, delegate work, and retrieve results directly from their existing workflows.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://autoclaw.z.ai"><img alt="AutoClaw" src="./docs/public/autoclaw.png" width="180"></a>
+    </td>
+    <td><a href="https://autoclaw.z.ai">AutoClaw</a> is Z.ai’s desktop AI assistant for work, deeply optimized for GLM models and integrated with specialized knowledge bases and workflows for legal, finance, design, and more.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://openagents.org/blog/posts/2026-09-08-pilot-user-program-zh-hypit"><img alt="OpenAgents" src="./docs/public/openagents.png" width="180"></a>
+    </td>
+    <td><a href="https://openagents.org">OpenAgents Workspace</a> is a product that helps you manage AI agents, allowing you to invoke agents running on any device (whether on a mobile phone or computer) anytime, anywhere. Agents can collaborate within the platform to help you complete tasks and boost efficiency. It currently supports integration with over 20 types of agents, including Claude, Codex, OpenClaw, and Hermes.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://monid.ai?fpr=alvin-45480b">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/monid-logo-white.svg">
+          <img alt="Monid" src="./docs/public/monid-logo-blue.svg" width="150">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://monid.ai?fpr=alvin-45480b">Monid</a> is the OpenRouter for agent tools: one key, one wallet, hundreds of tools, billed per call. Hypit can route Seedance video, images, speech and word-level transcription to Monid.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://www.hiapi.ai/invite/hypit"><img alt="HiAPI" src="./docs/public/hiapi.png" width="165"></a>
+    </td>
+    <td><a href="https://www.hiapi.ai/invite/hypit">HiAPI</a> is a unified API platform for AI image, video, audio, and language models. Connect GPT Image 2.5, Seedance 2.0, Veo 3.1, Kling, Wan, and other popular models through one platform. Pay as you go with no monthly fee, with free trial credits available for new users.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://api.pollo.ai/?utm_source=hypit"><img alt="Pollo API" src="./docs/public/pollo.jpg" width="120"></a>
+    </td>
+    <td><a href="https://api.pollo.ai/?utm_source=hypit">Pollo API</a> gives developers access to 300+ AI image and video models through a single API, with competitive rates. One API key connects you to multiple model providers and scales from 10 to 10,000+ requests.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://beatapi.io/sign-up?aff=hypit"><img alt="BeatAPI" src="./docs/public/beatapi.png" width="165"></a>
+    </td>
+    <td><a href="https://beatapi.io/sign-up?aff=hypit">BeatAPI</a> is the professional capability layer for any agent. We provide AI models, real-world data, task-ready capabilities, and professional workspaces that help agents complete real-world tasks.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://www.sume.com">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/sume-dark.png">
+          <img alt="Sume" src="./docs/public/sume-light.png" width="150">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://www.sume.com">Sume</a> provides access to leading AI image and video models through a single API, at provider pricing with 0% markup.</td>
+  </tr>
+  <tr>
+    <td width="220" align="center">
+      <a href="https://www.videorebirth.com/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./docs/public/video-rebirth-dark.svg">
+          <img alt="Video Rebirth" src="./docs/public/video-rebirth-light.svg" width="180">
+        </picture>
+      </a>
+    </td>
+    <td><a href="https://www.videorebirth.com/">Video Rebirth</a> builds BACH, an industrial-grade video model for production. BACH 1.0 Pro ranked No. 2 on Artificial Analysis's Image-to-Video leaderboard in September and October 2026. The company also open-sources the HyperFlow series; HyperFlow H3 Flash surpassed 320,000 downloads within six days of release.</td>
   </tr>
 </table>
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=hypit-ai/hypit&type=Date)](https://www.star-history.com/#hypit-ai/hypit&Date)
+<a href="https://www.star-history.com/?repos=hypit-ai%2Fhypit&type=date&logscale=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=hypit-ai/hypit&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=hypit-ai/hypit&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=hypit-ai/hypit&type=date&legend=bottom-right" />
+ </picture>
+</a>
+
+## Contributors
+
+<a href="https://github.com/hypit-ai/hypit/graphs/contributors">
+  <img alt="Contributors" src="https://contrib.rocks/image?repo=hypit-ai/hypit">
+</a>
 
 ## License
 

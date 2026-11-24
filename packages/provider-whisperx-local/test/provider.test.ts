@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { sealSpeechEvidenceAudio, speechTypes } from "@hypit/speech";
+import { sealSpeechEvidenceAudio, speechEvidenceTypes } from "@hypit/speech-evidence";
 import assert from "node:assert/strict";
-import { MemoryResourceStore, EndpointRegistry } from "@hypit/driver-node";
+import { MemoryResourceStore, EndpointRegistry } from "@hypit/executor";
 import type { Need } from "@hypit/protocol";
-import { speechEvidenceTypes } from "@hypit/speech-evidence";
 import {
   whisperXCapabilities,
   whisperXRequestForEvidenceAudio,
@@ -71,7 +70,7 @@ test("wire seconds are lowered once to exact evidence samples without authored S
   ]);
 });
 
-test("local Provider stages canonical evidence bytes unchanged and returns sealed alignment evidence", async () => {
+for (const language of ["en", "ko"]) test(`local Provider preserves ${language} and stages canonical evidence bytes unchanged`, async () => {
   const expected = wav(32_000);
   let stagedMatches = false;
   const originalFetch = globalThis.fetch;
@@ -92,10 +91,11 @@ test("local Provider stages canonical evidence bytes unchanged and returns seale
     assert.ok(url.endsWith("/transcribe"));
     const requestBody = init?.body;
     if (typeof requestBody !== "string") throw new Error("WhisperX request body is not JSON text");
-    const body = JSON.parse(requestBody) as { readonly audio_path: string };
+    const body = JSON.parse(requestBody) as { readonly audio_path: string; readonly language: string };
+    assert.equal(body.language, language);
     stagedMatches = Buffer.compare(Buffer.from(await readFile(body.audio_path)), Buffer.from(expected)) === 0;
     return new Response(JSON.stringify({
-      language: "en",
+      language,
       segments: [{ start: 0, end: 2, words: [
         { text: "hello", start: 0.1, end: 0.4 },
         { text: "world", start: 1.2, end: 1.6 },
@@ -106,10 +106,11 @@ test("local Provider stages canonical evidence bytes unchanged and returns seale
     const resources = new MemoryResourceStore();
     const artifact = await resources.put(expected, "audio/wav");
     const evidenceAudio = sealSpeechEvidenceAudio({
+      domainId: "provider-test-domain",
       artifact,
       sampleFrames: 32_000,
     });
-    const constraints = whisperXRequestForEvidenceAudio(evidenceAudio, { language: "en" });
+    const constraints = whisperXRequestForEvidenceAudio(evidenceAudio, { language });
     const need: Need = {
       id: "need:whisperx-loopback",
       capability: whisperXCapabilities.alignment,
@@ -136,7 +137,9 @@ test("local Provider stages canonical evidence bytes unchanged and returns seale
     assert.equal(output.value.kind, "inline");
     const value = output.value.kind === "inline" ? output.value.value : null;
     assert.equal((value as { readonly passages?: readonly unknown[] }).passages?.length, 1);
-    assert.equal(speechTypes.evidenceAudio.name, "SpeechEvidenceAudio");
+    assert.equal((value as { readonly domainId?: string }).domainId, evidenceAudio.domainId);
+    assert.equal((value as { readonly sampleFrames?: number }).sampleFrames, evidenceAudio.sampleFrames);
+    assert.equal(speechEvidenceTypes.audio.name, "SpeechEvidenceAudio");
   } finally {
     globalThis.fetch = originalFetch;
   }

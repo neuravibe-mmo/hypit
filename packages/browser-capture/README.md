@@ -2,17 +2,24 @@
 
 Browser material capture for websites and authored HTML. The package owns browser lifecycle and file
 capture; the task owns navigation, page state and the material worth showing. It imports Puppeteer Core,
-the upstream browser installer and Sharp directly and has no dependency on Hypit Core, Runtime,
-Providers or graph types.
+the upstream browser installer and Sharp directly. Its library does not create a Source Graph, Build,
+Result or Runtime; completed recordings reuse `@hypit/media-local`'s explicit file probe instead of
+forking a second ffprobe parser. The package's CLI contribution uses the installed Hypit CLI host.
 
-The Distribution supplies `hypit capture screenshot` and `hypit capture run`. See `hypit capture --help`
+This package also owns the `@hypit/browser-capture/cli` contribution used by the Distribution for
+`hypit capture screenshot` and `hypit capture run`. See `hypit capture --help`
 for command options. Puppeteer Core is a pinned Distribution dependency, so a plain video project
 needs no browser-library installation or private `node_modules` import path.
 `hypit capture install-browser` explicitly prepares the package's tested Chrome for Testing revision
 in the browser cache (`PUPPETEER_CACHE_DIR`, or `~/.cache/puppeteer`).
 `captureBrowserExecutablePath()` reports that path.
-The package pins Chrome 153.0.8010.12 for the native recording API; `installCaptureBrowser()` uses
-the upstream installer. Existing compatible browsers remain selectable through launch options.
+The recommended version is declared in this package's `package.json` under `hypit.captureBrowser`.
+`installCaptureBrowser()` uses the upstream installer. Both it and `captureBrowserExecutablePath()`
+accept `{ version, cacheDirectory, downloadBaseUrl }`; capture accepts the same selection as
+`options.browser`. CLI equivalents are `--browser-version`, `--browser-cache` and
+`--browser-download-base-url`. A custom download base must serve the upstream archive layout;
+there is no retry against an unselected source. Use the same version and cache when preparing and
+capturing. Capture never installs a browser, and a missing selected executable is an error. Existing compatible browsers remain selectable through launch options.
 
 ## Library
 
@@ -26,6 +33,8 @@ file as it finishes. A task failure closes the browser while preserving earlier 
   `defaultViewport` replaces it. `channel` selects an installed Chrome channel, `executablePath`
   selects a specific executable, and the default uses this package's tested Chrome for Testing.
   `PUPPETEER_CACHE_DIR` selects the cache directory.
+- `browser`: managed browser version/cache selection. It cannot be combined with an explicit
+  `launch.channel` or `launch.executablePath`.
 - `timeoutMs`: operation and navigation timeout for the initial page. Omission keeps Puppeteer's
   default; `0` disables that timeout. Scripts can configure other pages themselves.
 - `ffprobePath`: metadata reader for finished recordings; defaults to `ffprobe` on `PATH`.
@@ -52,8 +61,9 @@ capture rate, and `maxWidth` / `maxHeight` constrain output dimensions. These op
 to Puppeteer. The helper defaults those upper bounds to the viewport's device-pixel dimensions.
 Chrome determines the recorded dimensions; device scale can enlarge a screenshot without enlarging
 the recording. Use the returned `width` and `height` for placement. No FFmpeg encoder is involved;
-`ffprobe` reads the completed file's actual dimensions,
-duration, frame rate and audio presence. `stop()` is idempotent and waits for the file to finish.
+the `media-local` file probe invokes the selected `ffprobe` to read the completed file's actual
+dimensions, duration, frame rate and audio presence. Browser Capture does not keep a second media
+probe parser. `stop()` is idempotent and waits for the file to finish.
 
 Both functions accept an optional second `Page` argument for scripts using several pages. Returning
 finishes recordings started through `record`. Ordinary Puppeteer methods remain available; files
@@ -78,5 +88,5 @@ belong in those scripts through normal Puppeteer APIs. A simple screenshot waits
 `--wait-for` and `--wait-ms` add an authored readiness condition. The package does not interpret
 websites or silently rewrite page content.
 
-For a library import in an installed Distribution, use `@hypit/hypit/browser-capture`. The workspace package
-also exports the same API as `@hypit/browser-capture`.
+Library consumers import `@hypit/browser-capture` directly. The root Distribution selects it as an
+ordinary npm dependency; it does not republish the library through an `@hypit/hypit/*` facade.

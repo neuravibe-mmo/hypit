@@ -19,8 +19,9 @@ Core 只规划和推进依赖，不需要知道作品是一条视频。新组件
 
 ## 先确定项目，再选择 Profile
 
-从视频项目运行命令，或用 `--workspace` 明确指定项目。否则使用当前目录向上最近的
-`package.json`；没有时，以当前目录为项目。Source 文件名和 Runtime 配置都不决定这个边界。
+从 `package.json` 明确声明 `"hypit": { "project": true }` 的视频项目运行命令，或用
+`--project` 明确指定项目。否则 CLI 向上寻找该标记。组件包、任意当前目录、Source 文件名和
+Runtime 配置都不决定这个边界。
 
 ```bash
 hypit paths
@@ -45,7 +46,7 @@ hypit runtime init
   "dataRoot": ".hypit/runtimes/local",
   "credentials": {},
   "endpoints": {
-    "media.local": { "use": "@hypit/provider-media-local" }
+    "media.local": { "use": "@hypit/media-local" }
   },
   "bindings": {}
 }
@@ -69,19 +70,27 @@ hypit runtime init
 
 ## 按当前需要准备服务
 
+本地媒体处理可以直接准备所选工具并启动 Worker：
+
 ```bash
-hypit auth status
-hypit doctor --endpoint media.local
 hypit runtime up --endpoint media.local
 hypit runtime status
 ```
+
+只准备资源、暂不启动助手或 Worker 时，使用 `hypit programs prepare --endpoint media.local`。
+通过 `hypit programs status --endpoint media.local` 查看就绪情况；检查配置或排查失败时，
+使用 `hypit doctor --endpoint media.local`。按当前问题选择命令，不必依次执行所有检查。
+
+本地媒体处理没有凭据要求。选中的服务若声明了凭据槽，再单独使用
+`hypit auth status <endpoint>` 检查。例如，选择 HypiHub 后使用
+`hypit auth status hypihub.default`，需要连接账户时执行 `hypit auth login hypihub.default`。
 
 使用 Profile 里的实际 Endpoint 名称，可重复 `--endpoint` 选择多个；省略时覆盖整个 Profile。
 `doctor` 读取配置、运行 Provider 的诊断，不提交生成。除了错误，也要阅读警告：有凭据或能读取
 模型目录，不代表每种请求一定成功。没有选定 Runtime 时，doctor 只检查项目 Result。
 
 `runtime up` 准备所选本地依赖和 Managed Program，再启动 Worker；它不登录或启动托管服务。
-`programs up|status|down` 单独管理这些本地助手。首次推理环境准备可能涉及大量下载，
+`programs prepare|up|status|down` 单独管理这些本地资源和助手。首次推理环境准备可能涉及大量下载，
 应先比较本地准备成本和托管方式，再选择执行路径。
 
 `plan <run>` 检查当前工作需要的能力和轻量就绪状态。发现 Provider 能力需要可加载的包声明；
@@ -124,20 +133,9 @@ Provider 可以分别声明任务容量和 submit、poll、collect 的短调用�
 
 ## 产物留在项目里
 
-默认 Result 位于 `.hypit/results`。项目通过独立的 `hypit.results.json` 选择位置或仓库，
-不放进 Runtime Profile：
-
-```json
-{
-  "format": "hypit.build-results@1",
-  "use": "@hypit/build-result-fs",
-  "config": { "path": ".hypit/results" }
-}
-```
-
-S3 适配器可以把 Result 放进桶及项目专属前缀。适配器负责访问和凭据；更换 Result 存储不会
-搬走活跃 Runtime，也不会自动上传外部文件引用。已提交 Build 保留提交时的目标位置，
-修改选择不迁移历史。
+Result 位于运行 Hypit 的机器上、项目自己的 `.hypit/results`。本地电脑、SSH Linux 主机和
+官方 WebUI 后端遵循同一规则：整套 Runtime 部署到那个宿主，不把队列、工作文件和 Result
+存储拆到不同服务。需要长期归档或迁移时，在 Build 完成后显式处理这些文件。
 
 Result 在公开 Output 完成时发布它们，最后保留终态。新 Output 可以引用已有文件，复合值内部也一样，
 不意味着多一份素材。显式本地文件引用保持实时性；继续复用时需要保留它们的依赖。
@@ -145,5 +143,5 @@ Result 在公开 Output 完成时发布它们，最后保留终态。新 Output 
 
 `builds`、`history`、`inspect`、`get` 读取项目 Result，不依赖原 Runtime。
 精确存储和执行接口见
-[Result 包](https://github.com/hypit-ai/hypit/blob/main/packages/build-result/README.md) 与
+[Result 包](https://github.com/hypit-ai/hypit/blob/main/packages/result/README.md) 与
 [本地 Runtime 包](https://github.com/hypit-ai/hypit/blob/main/packages/runtime-local/README.md)。

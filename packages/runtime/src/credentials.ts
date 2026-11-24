@@ -39,10 +39,12 @@ export function decodeOAuth2Credential(secret: string): OAuth2Credential | undef
   return candidate as OAuth2Credential;
 }
 
-/** Host-facing way to acquire one credential; Provider-specific values stay in its Endpoint package. */
+/** Host-facing way to acquire one credential; Provider-specific values stay in its Provider package. */
 export type CredentialAcquisition = {
   readonly kind: "oauth2-pkce";
   readonly authorizationEndpoint: string;
+  /** Service-hosted page that shows the code and forwards it to the port packed into `state`. */
+  readonly redirectUri: string;
   readonly tokenEndpoint: string;
   readonly clientId: string;
   readonly scopes: readonly string[];
